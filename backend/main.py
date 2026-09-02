@@ -1,8 +1,10 @@
 import json
+import time
 import os
 import re
 import shutil
 import sqlite3
+
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,6 +40,7 @@ def load_env():
     env_file = BASE_DIR / ".env"
 
     if not env_file.exists():
+        print(".env file not found.")
         return
 
     for line in env_file.read_text(
@@ -71,10 +74,15 @@ app = FastAPI(
 )
 
 
+# ============================================================
+# CORS
+# ============================================================
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173"
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -202,7 +210,9 @@ def create_profile(
         FROM profiles
         WHERE email = ?
         """,
-        (str(profile.email),)
+        (
+            str(profile.email),
+        )
     ).fetchone()
 
     if existing:
@@ -248,7 +258,9 @@ def create_profile(
         FROM profiles
         WHERE id = ?
         """,
-        (cursor.lastrowid,)
+        (
+            cursor.lastrowid,
+        )
     ).fetchone()
 
     connection.close()
@@ -260,9 +272,7 @@ def create_profile(
 # RESUME TEXT EXTRACTION
 # ============================================================
 
-def extract_text(
-    file_path: Path
-):
+def extract_text(file_path: Path):
 
     suffix = file_path.suffix.lower()
 
@@ -287,17 +297,15 @@ def extract_text(
 
         from pypdf import PdfReader
 
-        reader = PdfReader(
-            file_path
-        )
+        reader = PdfReader(file_path)
 
         text = []
 
         for page in reader.pages:
 
-            text.append(
-                page.extract_text() or ""
-            )
+            page_text = page.extract_text() or ""
+
+            text.append(page_text)
 
         return "\n".join(text)
 
@@ -310,9 +318,7 @@ def extract_text(
 
         from docx import Document
 
-        document = Document(
-            file_path
-        )
+        document = Document(file_path)
 
         return "\n".join(
             paragraph.text
@@ -323,8 +329,7 @@ def extract_text(
     raise HTTPException(
         status_code=400,
         detail=(
-            "Only PDF, DOCX, and TXT "
-            "files are supported."
+            "Only PDF, DOCX, and TXT files are supported."
         )
     )
 
@@ -333,18 +338,12 @@ def extract_text(
 # LOCAL FALLBACK EXTRACTION
 # ============================================================
 
-def local_fallback_extraction(
-    text: str
-):
+def local_fallback_extraction(text: str):
 
     """
     Local rule-based resume extraction.
 
-    This is used when:
-    - OPENAI_API_KEY is missing
-    - OpenAI quota is unavailable
-    - OpenAI API returns an error
-    - LLM response cannot be parsed
+    Used when Gemini is unavailable or fails.
     """
 
     # ========================================================
@@ -375,7 +374,6 @@ def local_fallback_extraction(
 
     known_skills = [
 
-        # Programming
         "Python",
         "Java",
         "C++",
@@ -383,7 +381,6 @@ def local_fallback_extraction(
         "JavaScript",
         "TypeScript",
 
-        # Web
         "HTML",
         "CSS",
         "React",
@@ -392,7 +389,6 @@ def local_fallback_extraction(
         "Flask",
         "Django",
 
-        # Databases
         "SQL",
         "MySQL",
         "PostgreSQL",
@@ -400,44 +396,37 @@ def local_fallback_extraction(
         "SQLite",
         "NoSQL",
 
-        # Development
         "Git",
         "GitHub",
         "Docker",
         "REST API",
         "API",
 
-        # Cloud
         "AWS",
         "Azure",
         "Google Cloud",
         "GCP",
 
-        # AI / ML
         "Artificial Intelligence",
         "Machine Learning",
         "Deep Learning",
         "Generative AI",
         "GenAI",
 
-        # ML libraries
         "TensorFlow",
         "PyTorch",
         "Scikit-learn",
         "OpenCV",
 
-        # Data
         "Pandas",
         "NumPy",
         "Data Science",
         "Data Analytics",
 
-        # Visualization
         "Power BI",
         "Tableau",
         "Matplotlib",
 
-        # Other
         "R",
         "Kubernetes",
         "Figma",
@@ -559,9 +548,7 @@ def local_fallback_extraction(
 
         if current_section:
 
-            sections[
-                current_section
-            ].append(line)
+            sections[current_section].append(line)
 
 
     # ========================================================
@@ -570,9 +557,7 @@ def local_fallback_extraction(
 
     education = []
 
-    education_lines = sections[
-        "education"
-    ]
+    education_lines = sections["education"]
 
 
     degree_keywords = [
@@ -613,14 +598,10 @@ def local_fallback_extraction(
             keyword.lower() in line.lower()
             for keyword in degree_keywords
         ):
-
             continue
 
 
-        year_match = year_pattern.search(
-            line
-        )
-
+        year_match = year_pattern.search(line)
 
         year = (
             year_match.group(0)
@@ -630,7 +611,6 @@ def local_fallback_extraction(
 
 
         degree = line
-
 
         if year:
 
@@ -678,21 +658,19 @@ def local_fallback_extraction(
 
 
         if key in used_education:
-
             continue
 
 
         used_education.add(key)
 
 
-        education.append({
-
-            "institution": institution,
-
-            "degree": degree,
-
-            "year": year
-        })
+        education.append(
+            {
+                "institution": institution,
+                "degree": degree,
+                "year": year
+            }
+        )
 
 
     # ========================================================
@@ -701,27 +679,24 @@ def local_fallback_extraction(
 
     experience = []
 
-    experience_lines = sections[
-        "experience"
-    ]
+    experience_lines = sections["experience"]
 
 
     duration_pattern = re.compile(
         r"(?i)"
         r"(?:"
-        r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)"
+        r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
         r"[a-z]*\s+\d{4}"
         r"\s*[-–]\s*"
         r"(?:"
-        r"present"
+        r"Present"
         r"|"
-        r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)"
+        r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
         r"[a-z]*\s+\d{4}"
         r")"
         r")"
         r"|"
-        r"\b\d{4}\s*[-–]\s*"
-        r"(?:\d{4}|present)\b"
+        r"\b\d{4}\s*[-–]\s*(?:\d{4}|Present)\b"
     )
 
 
@@ -730,8 +705,8 @@ def local_fallback_extraction(
 
     for line in experience_lines:
 
-        duration_match = (
-            duration_pattern.search(line)
+        duration_match = duration_pattern.search(
+            line
         )
 
 
@@ -744,9 +719,7 @@ def local_fallback_extraction(
                 )
 
 
-            duration = (
-                duration_match.group(0)
-            )
+            duration = duration_match.group(0)
 
 
             role = line.replace(
@@ -789,9 +762,7 @@ def local_fallback_extraction(
 
         if current_experience:
 
-            if not current_experience[
-                "company"
-            ]:
+            if not current_experience["company"]:
 
                 current_experience[
                     "company"
@@ -814,10 +785,7 @@ def local_fallback_extraction(
 
     projects = []
 
-    project_lines = sections[
-        "projects"
-    ]
-
+    project_lines = sections["projects"]
 
     current_project = None
 
@@ -825,13 +793,8 @@ def local_fallback_extraction(
     for line in project_lines:
 
         if not line.strip():
-
             continue
 
-
-        # ----------------------------------------------------
-        # Bullet = description
-        # ----------------------------------------------------
 
         if line.startswith(
             ("•", "-", "*")
@@ -839,11 +802,9 @@ def local_fallback_extraction(
 
             if current_project:
 
-                description = (
-                    line.lstrip(
-                        "•-* "
-                    ).strip()
-                )
+                description = line.lstrip(
+                    "•-* "
+                ).strip()
 
                 current_project[
                     "description"
@@ -851,10 +812,6 @@ def local_fallback_extraction(
 
             continue
 
-
-        # ----------------------------------------------------
-        # Determine if line is title
-        # ----------------------------------------------------
 
         lower_line = line.lower()
 
@@ -911,11 +868,10 @@ def local_fallback_extraction(
                     )
 
 
-            project_name = re.sub(
-                r"\|.*",
-                "",
+            project_name = re.split(
+                r"\s*\|\s*",
                 line
-            ).strip()
+            )[0].strip()
 
 
             current_project = {
@@ -953,7 +909,6 @@ def local_fallback_extraction(
 
     certifications = []
 
-
     certification_lines = sections[
         "certifications"
     ]
@@ -987,12 +942,12 @@ def local_fallback_extraction(
     summary = (
         "Resume processed using local "
         "structured extraction because "
-        "the LLM service was unavailable."
+        "the Gemini service was unavailable."
     )
 
 
     # ========================================================
-    # RETURN STRUCTURED DATA
+    # RETURN
     # ========================================================
 
     return {
@@ -1012,38 +967,28 @@ def local_fallback_extraction(
 
 
 # ============================================================
-# LLM + FALLBACK EXTRACTION
+# GEMINI + FALLBACK EXTRACTION
 # ============================================================
 
-def extract_resume_data(
-    text: str
-):
+def extract_resume_data(text: str):
 
     """
-    Attempts OpenAI LLM extraction first.
+    Resume extraction pipeline.
 
-    If:
-    - API key is missing
-    - quota is exhausted
-    - API returns an error
-    - response is invalid
-
-    then local extraction is automatically used.
+    Priority:
+    1. Gemini 3.6 Flash
+    2. Local rule-based fallback
     """
 
     api_key = os.getenv(
-        "OPENAI_API_KEY"
+        "GEMINI_API_KEY"
     )
 
-
-    # ========================================================
-    # NO API KEY
-    # ========================================================
 
     if not api_key:
 
         print(
-            "OPENAI_API_KEY not found."
+            "GEMINI_API_KEY not found."
         )
 
         print(
@@ -1056,156 +1001,204 @@ def extract_resume_data(
         )
 
 
-    # ========================================================
-    # TRY OPENAI
-    # ========================================================
-
     try:
 
-        from openai import OpenAI
+        from google import genai
 
 
-        prompt = f"""
-Extract the following resume into JSON only.
-
-Use exactly this structure:
-
-{{
-  "summary": "short candidate summary",
-
-  "skills": [
-    "skill"
-  ],
-
-  "education": [
-    {{
-      "institution": "",
-      "degree": "",
-      "year": ""
-    }}
-  ],
-
-  "experience": [
-    {{
-      "company": "",
-      "role": "",
-      "duration": "",
-      "highlights": [""]
-    }}
-  ],
-
-  "projects": [
-    {{
-      "name": "",
-      "description": "",
-      "technologies": [""]
-    }}
-  ],
-
-  "certifications": [
-    "certification"
-  ]
-}}
-
-Rules:
-
-- Extract only information explicitly present in the resume.
-- Do not invent information.
-- Use empty arrays if information is missing.
-- Keep the extracted information concise.
-- Return valid JSON only.
-
-Resume:
-
-{text[:15000]}
-"""
-
-
-        client = OpenAI(
+        client = genai.Client(
             api_key=api_key
         )
 
 
-        response = client.chat.completions.create(
-
-            model=os.getenv(
-                "OPENAI_MODEL",
-                "gpt-4o-mini"
-            ),
-
-            messages=[
-
-                {
-                    "role": "system",
-
-                    "content": (
-                        "You are a resume parsing "
-                        "assistant. Extract accurate "
-                        "structured information without "
-                        "inventing details."
-                    )
-                },
-
-                {
-                    "role": "user",
-
-                    "content": prompt
-                }
-            ],
-
-            response_format={
-                "type": "json_object"
-            },
-
-            temperature=0
+        model = os.getenv(
+            "GEMINI_MODEL",
+            "gemini-3.6-flash"
         )
 
 
-        content = (
-            response
-            .choices[0]
-            .message
-            .content
+        # Keep enough resume text for parsing
+        resume_text = text[:8000]
+
+
+        prompt = f"""
+You are an expert resume parsing system.
+
+Analyze the resume text below and extract structured information.
+
+Return ONLY valid JSON.
+
+Use exactly this structure:
+
+{{
+    "summary": "short professional summary",
+    "skills": [],
+    "education": [
+        {{
+            "institution": "",
+            "degree": "",
+            "year": ""
+        }}
+    ],
+    "experience": [
+        {{
+            "company": "",
+            "role": "",
+            "duration": "",
+            "highlights": []
+        }}
+    ],
+    "projects": [
+        {{
+            "name": "",
+            "description": "",
+            "technologies": []
+        }}
+    ],
+    "certifications": []
+}}
+
+Rules:
+
+1. Extract ONLY information present in the resume.
+2. Do NOT invent information.
+3. Correct obvious PDF extraction spacing errors.
+4. Preserve institution names.
+5. Preserve project names.
+6. Keep education, experience, projects and certifications separate.
+7. Put technical abilities in skills.
+8. If a section is missing, return an empty array.
+9. Return JSON only.
+
+Resume text:
+
+{resume_text}
+"""
+
+
+        print(
+            "\n========== GEMINI REQUEST =========="
         )
+
+        print(
+            f"Model: {model}"
+        )
+
+        print(
+            f"Characters sent: {len(resume_text)}"
+        )
+
+
+        start_time = time.time()
+
+
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt
+        )
+
+
+        elapsed = time.time() - start_time
+
+
+        print(
+            f"Gemini response received in "
+            f"{elapsed:.2f} seconds."
+        )
+
+
+        content = response.text
 
 
         if not content:
 
             raise ValueError(
-                "LLM returned an empty response."
+                "Gemini returned an empty response."
             )
 
 
-        data = json.loads(
-            content
+        print(
+            "Gemini raw response received."
         )
 
 
+        # ====================================================
+        # CLEAN RESPONSE
+        # ====================================================
+
+        content = content.strip()
+
+
+        if content.startswith("```"):
+
+            content = re.sub(
+                r"^```(?:json)?\s*",
+                "",
+                content,
+                flags=re.IGNORECASE
+            )
+
+            content = re.sub(
+                r"\s*```$",
+                "",
+                content
+            ).strip()
+
+
+        # ====================================================
+        # PARSE JSON
+        # ====================================================
+
+        data = json.loads(content)
+
+
+        # ====================================================
+        # VALIDATE STRUCTURE
+        # ====================================================
+
+        required_fields = [
+
+            "summary",
+            "skills",
+            "education",
+            "experience",
+            "projects",
+            "certifications"
+        ]
+
+
+        for field in required_fields:
+
+            if field not in data:
+
+                raise ValueError(
+                    f"Gemini response missing field: {field}"
+                )
+
+
+        # ====================================================
+        # SUCCESS
+        # ====================================================
+
         print(
-            "Resume extracted successfully "
-            "using OpenAI."
+            "Resume extracted successfully using Gemini."
         )
 
 
         return (
             data,
-            "openai_llm"
+            "gemini_llm"
         )
 
-
-    # ========================================================
-    # OPENAI ERROR → LOCAL FALLBACK
-    # ========================================================
 
     except Exception as error:
 
         print(
-            f"OpenAI extraction failed: {error}"
+            f"Gemini extraction failed: {error}"
         )
 
         print(
-            "Falling back to local "
-            "resume extraction."
+            "Falling back to local resume extraction."
         )
 
 
@@ -1237,14 +1230,14 @@ async def upload_resume(
     # ========================================================
 
     profile = connection.execute(
-
         """
         SELECT id
         FROM profiles
         WHERE id = ?
         """,
-
-        (profile_id,)
+        (
+            profile_id,
+        )
     ).fetchone()
 
 
@@ -1253,15 +1246,13 @@ async def upload_resume(
         connection.close()
 
         raise HTTPException(
-
             status_code=404,
-
             detail="Profile not found."
         )
 
 
     # ========================================================
-    # CHECK FILE TYPE
+    # CHECK FILE
     # ========================================================
 
     if not file.filename:
@@ -1269,9 +1260,7 @@ async def upload_resume(
         connection.close()
 
         raise HTTPException(
-
             status_code=400,
-
             detail="Filename is missing."
         )
 
@@ -1280,6 +1269,10 @@ async def upload_resume(
         file.filename
     ).suffix.lower()
 
+
+    # ========================================================
+    # CHECK FILE TYPE
+    # ========================================================
 
     if suffix not in {
         ".pdf",
@@ -1290,9 +1283,7 @@ async def upload_resume(
         connection.close()
 
         raise HTTPException(
-
             status_code=400,
-
             detail=(
                 "Upload PDF, DOCX, or TXT only."
             )
@@ -1314,13 +1305,25 @@ async def upload_resume(
     )
 
 
-    with saved_path.open(
-        "wb"
-    ) as output_file:
+    try:
 
-        shutil.copyfileobj(
-            file.file,
-            output_file
+        with saved_path.open("wb") as output_file:
+
+            shutil.copyfileobj(
+                file.file,
+                output_file
+            )
+
+
+    except Exception as error:
+
+        connection.close()
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Could not save resume: {error}"
+            )
         )
 
 
@@ -1333,9 +1336,36 @@ async def upload_resume(
         resume_text = extract_text(
             saved_path
         )
-        print("\n========== RESUME TEXT ==========")
-        print(resume_text[:3000])
-        print("========== END RESUME TEXT ==========\n")
+
+
+        # ====================================================
+        # DEBUG INFORMATION
+        # ====================================================
+
+        print(
+            "\n========== RESUME TEXT =========="
+        )
+
+        print(
+            resume_text[:3000]
+        )
+
+        print(
+            "========== END RESUME TEXT ==========\n"
+        )
+
+        print(
+            "========== EXTRACTED TEXT LENGTH =========="
+        )
+
+        print(
+            len(resume_text)
+        )
+
+        print(
+            "============================================"
+        )
+
 
         if not resume_text.strip():
 
@@ -1344,6 +1374,10 @@ async def upload_resume(
                 "in this resume."
             )
 
+
+        # ====================================================
+        # GEMINI / FALLBACK
+        # ====================================================
 
         extracted_data, method = (
             extract_resume_data(
@@ -1360,11 +1394,8 @@ async def upload_resume(
 
         connection.close()
 
-
         raise HTTPException(
-
             status_code=422,
-
             detail=(
                 f"Could not parse resume: {error}"
             )
@@ -1380,47 +1411,54 @@ async def upload_resume(
     ).isoformat()
 
 
-    cursor = connection.execute(
+    try:
 
-        """
-        INSERT INTO resumes
-        (
-            profile_id,
-            filename,
-            file_path,
-            file_type,
-            size_bytes,
-            uploaded_at,
-            extraction_json,
-            extraction_method
+        cursor = connection.execute(
+            """
+            INSERT INTO resumes
+            (
+                profile_id,
+                filename,
+                file_path,
+                file_type,
+                size_bytes,
+                uploaded_at,
+                extraction_json,
+                extraction_method
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                profile_id,
+                file.filename,
+                str(saved_path),
+                file.content_type,
+                saved_path.stat().st_size,
+                uploaded_at,
+                json.dumps(
+                    extracted_data
+                ),
+                method
+            )
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
 
-        (
 
-            profile_id,
+        connection.commit()
 
-            file.filename,
 
-            str(saved_path),
+    except Exception as error:
 
-            file.content_type,
+        connection.rollback()
 
-            saved_path.stat().st_size,
+        connection.close()
 
-            uploaded_at,
-
-            json.dumps(
-                extracted_data
-            ),
-
-            method
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Could not save resume data: {error}"
+            )
         )
-    )
 
-
-    connection.commit()
 
     connection.close()
 
