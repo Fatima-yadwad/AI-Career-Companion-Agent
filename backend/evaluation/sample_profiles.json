@@ -1,0 +1,154 @@
+[
+  {
+    "profile_id": "STU001",
+    "name": "Aarav Sharma",
+    "target_role": "Machine Learning Intern",
+    "skills": [
+      "Python",
+      "Machine Learning",
+      "Deep Learning",
+      "TensorFlow",
+      "Scikit-learn",
+      "Pandas",
+      "NumPy",
+      "OpenCV",
+      "Computer Vision",
+      "SQL"
+    ],
+    "education": "B.E. Artificial Intelligence and Machine Learning",
+    "experience": "Academic projects in machine learning and computer vision",
+    "projects": [
+      "AI Plant Disease Detection using Python, OpenCV and TensorFlow",
+      "Credit Card Fraud Detection using Machine Learning and Scikit-learn",
+      "Computer Vision based Sign Language Translator"
+    ],
+    "qualifications": [
+      "Strong Python programming",
+      "Machine learning fundamentals",
+      "Deep learning fundamentals",
+      "Data preprocessing and model evaluation"
+    ]
+  },
+  {
+    "profile_id": "STU002",
+    "name": "Diya Mehta",
+    "target_role": "Frontend Developer Intern",
+    "skills": [
+      "HTML",
+      "CSS",
+      "JavaScript",
+      "React",
+      "React.js",
+      "Git",
+      "GitHub",
+      "REST API",
+      "Responsive Web Design"
+    ],
+    "education": "B.E. Computer Science and Engineering",
+    "experience": "Academic web development projects",
+    "projects": [
+      "E-commerce website using React and JavaScript",
+      "Responsive portfolio website using HTML and CSS",
+      "React dashboard consuming REST APIs"
+    ],
+    "qualifications": [
+      "Frontend development fundamentals",
+      "React development",
+      "JavaScript programming",
+      "Responsive UI development"
+    ]
+  },
+  {
+    "profile_id": "STU003",
+    "name": "Rohan Kulkarni",
+    "target_role": "Data Science Intern",
+    "skills": [
+      "Python",
+      "SQL",
+      "Pandas",
+      "NumPy",
+      "Matplotlib",
+      "Scikit-learn",
+      "Data Analysis",
+      "Machine Learning",
+      "Statistics",
+      "Data Visualization"
+    ],
+    "education": "B.E. Artificial Intelligence and Data Science",
+    "experience": "Academic data analysis and machine learning projects",
+    "projects": [
+      "Customer data analysis using Python and Pandas",
+      "Sales forecasting using Scikit-learn",
+      "Data visualization dashboard using Matplotlib"
+    ],
+    "qualifications": [
+      "Python programming",
+      "SQL and database knowledge",
+      "Data analysis",
+      "Machine learning fundamentals",
+      "Statistical analysis"
+    ]
+  },
+  {
+    "profile_id": "STU004",
+    "name": "Ishaan Verma",
+    "target_role": "Cloud Engineer Intern",
+    "skills": [
+      "Python",
+      "AWS",
+      "Amazon Web Services",
+      "EC2",
+      "S3",
+      "Cloud Computing",
+      "Docker",
+      "Linux",
+      "Git",
+      "Networking"
+    ],
+    "education": "B.E. Information Technology",
+    "experience": "Cloud computing laboratory projects and deployment practice",
+    "projects": [
+      "AWS hosted web application using EC2 and S3",
+      "Dockerized Python application",
+      "Cloud deployment and monitoring project"
+    ],
+    "qualifications": [
+      "Cloud computing fundamentals",
+      "AWS fundamentals",
+      "Linux administration",
+      "Docker basics",
+      "Networking fundamentals"
+    ]
+  },
+  {
+    "profile_id": "STU005",
+    "name": "Kavya Rao",
+    "target_role": "Cybersecurity Intern",
+    "skills": [
+      "Cybersecurity",
+      "Network Security",
+      "Python",
+      "Linux",
+      "Ethical Hacking",
+      "Web Security",
+      "Cryptography",
+      "Computer Networks",
+      "SQL",
+      "Security Testing"
+    ],
+    "education": "B.E. Computer Science and Engineering",
+    "experience": "Academic cybersecurity and networking laboratory projects",
+    "projects": [
+      "Network traffic monitoring using Python",
+      "Web application security testing project",
+      "Password security and cryptography demonstration"
+    ],
+    "qualifications": [
+      "Cybersecurity fundamentals",
+      "Computer networking",
+      "Linux fundamentals",
+      "Web security fundamentals",
+      "Security testing"
+    ]
+  }
+]

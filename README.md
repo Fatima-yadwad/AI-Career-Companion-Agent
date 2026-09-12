@@ -1,457 +1,610 @@
-# 🤖 AI Career Companion Agent
+# AI Career Companion Agent
 
-> **AI-powered career assistance for internship matching, resume analysis, skill-gap identification, and interview preparation.**
+> An AI-powered career companion for internship matching, resume intelligence, skill-gap analysis, interview preparation, and personalized career assistance.
 
-The **AI Career Companion Agent** is an AI-based platform designed to help students throughout the internship application and preparation process.
+## 🚀 Project Overview
 
-The system analyzes a student's profile and resume, extracts structured information such as skills, education, experience, projects, and certifications, and uses this information as the foundation for personalized career guidance.
+**AI Career Companion Agent** is an intelligent multi-agent career platform designed to help students and early-career candidates discover relevant internships and prepare for their careers.
 
-The planned system combines **React, FastAPI, SQLite, Gemini/LLM, Retrieval-Augmented Generation (RAG), and specialized AI agents** to create an intelligent career-support platform.
+The system combines:
 
+- Resume parsing
+- Structured candidate profiles
+- Retrieval-Augmented Generation (RAG)
+- Semantic job retrieval
+- AI-based job-resume matching
+- Skill analysis
+- Interview preparation
+- Career assistance
 
+The current implementation focuses on **Milestone 1 and Milestone 2**, including the candidate profile system, resume intelligence pipeline, internship knowledge base, RAG retrieval, job matching engine, evaluation pipeline, and the Career Companion dashboard.
 
-## 🎯 Project Objective
+---
 
-Finding and preparing for internships can be challenging for students because every opportunity may have different requirements.
+# 🎯 Problem Statement
 
-Students often need to:
+Students often struggle to:
 
-* Search for suitable internships
-* Understand job requirements
-* Compare their skills with job requirements
-* Identify missing skills
-* Customize their resumes
-* Write cover letters
-* Prepare for interviews
-* Track their applications
-* Make informed career decisions
+- Find internships relevant to their skills
+- Understand whether their resume matches a job
+- Identify missing skills
+- Prepare for interviews
+- Tailor resumes and applications
+- Navigate the internship search process efficiently
 
-The goal of the **AI Career Companion Agent** is to bring these activities together into one platform and provide personalized assistance based on the student's profile and resume.
+Existing job portals primarily provide search and filtering functionality. AI Career Companion aims to provide a more personalized, intelligent workflow by understanding the candidate's profile and resume and comparing them with relevant opportunities.
 
+---
 
+# 💡 Solution
 
-## 🏗️ System Architecture
+AI Career Companion creates a structured representation of the candidate from their profile and resume.
 
-The proposed system follows a layered architecture:
+The system then uses this information to retrieve and rank relevant internship and early-career opportunities.
 
-```text
-Student
-   ↓
-React Frontend
-   ↓
-FastAPI Backend
-   ↓
-Profile + Resume Database
-   ↓
-Resume Parser
-   ↓
-LLM / Gemini
-   ↓
-RAG Knowledge Base
-   ↓
-6 Specialized Agents
-   ↓
-Career Recommendations
-```
-
-### Architecture Flow
-
-1. **Student** interacts with the application.
-2. **React Frontend** provides the user interface.
-3. **FastAPI Backend** handles API requests, validation, and system coordination.
-4. **Profile + Resume Database** stores candidate information and resume metadata.
-5. **Resume Parser** extracts text from uploaded resumes.
-6. **Gemini/LLM** converts unstructured resume text into structured information.
-7. **RAG Knowledge Base** provides relevant internship and career information.
-8. **Six Specialized AI Agents** perform different career-support tasks.
-9. **Career Recommendations** are generated based on the student's profile and relevant information.
-
-
-
-## 🧩 Core Components
-
-| Component              | Purpose                                               |
-| ---------------------- | ----------------------------------------------------- |
-| **React + Vite**       | Student-facing web interface                          |
-| **FastAPI**            | Backend API and system coordination                   |
-| **SQLite**             | Candidate and resume metadata storage for Milestone 1 |
-| **Resume Parser**      | Extracts text from PDF, DOCX, and TXT resumes         |
-| **Gemini / LLM**       | Extracts structured information from resume text      |
-| **RAG Knowledge Base** | Retrieves relevant internship and career information  |
-| **AI Agent Layer**     | Provides specialized career assistance                |
-| **Local File Storage** | Stores uploaded resumes during development            |
-
-
-
-# 📄 Resume Processing Pipeline
-
-The initial system focuses on transforming an uploaded resume into a structured candidate profile.
+### Current workflow
 
 ```text
+Student Profile
+       ↓
 Resume Upload
-      ↓
-File Validation
-      ↓
-Resume Parser
-      ↓
-Extracted Text
-      ↓
-Gemini / LLM
-      ↓
-Structured Resume JSON
-      ↓
-Database
-      ↓
-AI Career Agents
+       ↓
+Resume Parsing
+       ↓
+Structured Candidate Profile
+       ↓
+Candidate + Skills + Target Role
+       ↓
+Semantic RAG Retrieval
+       ↓
+Job-Resume Matching Engine
+       ↓
+Ranked Job Recommendations
 ```
 
-The system extracts information including:
+---
 
-* Summary
-* Skills
-* Education
-* Experience
-* Projects
-* Certifications
-
-This structured information can then be reused by the different AI agents.
-
-
-
-# 🗄️ Database Design
-
-The initial database contains two primary entities:
+# 🏗️ System Architecture
 
 ```text
-┌──────────────────────┐
-│       PROFILES       │
-├──────────────────────┤
-│ PK id                │
-│ full_name            │
-│ email                │
-│ phone                │
-│ location             │
-│ target_role          │
-│ linkedin_url         │
-│ created_at           │
-└──────────┬───────────┘
-           │
-           │ 1 : N
-           ▼
-┌──────────────────────┐
-│       RESUMES        │
-├──────────────────────┤
-│ PK id                │
-│ FK profile_id        │
-│ filename             │
-│ file_path            │
-│ file_type            │
-│ size_bytes           │
-│ uploaded_at          │
-│ extraction_json      │
-│ extraction_method    │
-└──────────┬───────────┘
-           │
-           ▼
-┌──────────────────────┐
-│  STRUCTURED RESUME   │
-├──────────────────────┤
-│ Summary              │
-│ Skills               │
-│ Education            │
-│ Experience           │
-│ Projects             │
-│ Certifications       │
-└──────────────────────┘
+                    AI CAREER COMPANION
+                           │
+                           ▼
+                 ┌───────────────────┐
+                 │   React Frontend  │
+                 │  Career Dashboard │
+                 └─────────┬─────────┘
+                           │
+                           ▼
+                 ┌───────────────────┐
+                 │    FastAPI API    │
+                 └─────────┬─────────┘
+                           │
+             ┌─────────────┼─────────────┐
+             ▼             ▼             ▼
+      ┌────────────┐ ┌────────────┐ ┌─────────────┐
+      │  Profile   │ │   Resume   │ │  Matching   │
+      │ Management │ │  Analysis  │ │   Engine    │
+      └────────────┘ └──────┬─────┘ └──────┬──────┘
+                            │                │
+                            ▼                ▼
+                    ┌──────────────┐ ┌──────────────┐
+                    │ Gemini /     │ │ RAG Pipeline │
+                    │ Local Parser │ │              │
+                    └──────────────┘ └──────┬───────┘
+                                            │
+                                            ▼
+                                    ┌──────────────┐
+                                    │ FAISS Vector │
+                                    │    Store     │
+                                    └──────┬───────┘
+                                           │
+                                           ▼
+                                    ┌──────────────┐
+                                    │ Internship & │
+                                    │ Early Career │
+                                    │    Jobs      │
+                                    └──────────────┘
 ```
 
-### Profiles
+---
 
-Stores basic student information such as:
+# 🧩 Multi-Agent Architecture
 
-* Full name
-* Email
-* Phone
-* Location
-* Target role
-* LinkedIn URL
-* Profile creation date
+The long-term platform is designed around specialized AI agents.
 
-### Resumes
+| Agent                     | Responsibility                                 |
+| ------------------------- | ---------------------------------------------- |
+| Job-Resume Matching Agent | Matches candidates with relevant opportunities |
+| Skill Gap Agent           | Identifies missing skills for target roles     |
+| Resume Agent              | Improves and tailors resumes                   |
+| Cover Letter Agent        | Generates personalized cover letters           |
+| Interview Agent           | Provides interview preparation                 |
+| Career Assistant          | Provides personalized career guidance          |
 
-Stores information about uploaded resumes including:
+### Current implementation
 
-* Filename
-* File path
-* File type
-* File size
-* Upload date
-* Extracted JSON
-* Extraction method
+The **Job-Resume Matching workflow is implemented as the primary M2 capability**.
 
-A single student profile can have multiple resumes, giving a **one-to-many (1:N)** relationship.
+The remaining agents are planned for subsequent milestones.
 
+---
 
+# 📌 Milestone 1 — Candidate & Resume Intelligence
 
-# 🧠 Retrieval-Augmented Generation (RAG)
+## M1.1 Research
 
-**Retrieval-Augmented Generation (RAG)** will be used in later milestones to provide the AI system with relevant external information.
+Research covered:
 
-The knowledge base can contain:
+- Internship application workflows
+- RAG architecture
+- Multi-agent systems
+- Resume parsing
+- Candidate profile representation
+- Technology selection
 
-* Internship job descriptions
-* Required skills
-* Eligibility criteria
-* Company information
-* Interview preparation resources
-* Career guidance resources
+## M1.2 Architecture
 
-### RAG Workflow
+Defined:
+
+- Multi-agent architecture
+- Candidate profile schema
+- Resume processing pipeline
+- RAG-based job retrieval workflow
+- Candidate-to-job matching workflow
+
+## M1.3 Student Profile
+
+Implemented:
+
+- Candidate profile creation
+- Name
+- Email
+- Phone
+- Location
+- Target role
+- LinkedIn profile
+
+Profiles are stored in SQLite.
+
+## M1.4 Resume Parsing
+
+Implemented resume upload and extraction for:
+
+- PDF
+- DOCX
+- TXT
+
+The parser extracts:
+
+- Summary
+- Skills
+- Education
+- Experience
+- Projects
+- Certifications
+
+### AI extraction
+
+When Gemini is available, the system can use an LLM-based extraction workflow.
+
+A local rule-based extraction fallback is also available so that the application remains functional when an LLM is unavailable.
+
+---
+
+# 🔎 Milestone 2 — RAG & Internship Matching
+
+## M2.1 Internship Dataset
+
+A LinkedIn job dataset was processed and curated for the prototype.
+
+### Final dataset
+
+- **102 job records**
+- **20 internship opportunities**
+- **78 early-career opportunities**
+- **4 trainee opportunities**
+
+The dataset was filtered to focus on relevant technical career opportunities.
+
+No synthetic job records were added.
+
+---
+
+# 🧠 M2.2 RAG Pipeline
+
+The job knowledge base uses Retrieval-Augmented Generation principles.
+
+### Pipeline
 
 ```text
-Job Postings / Career Resources
-              ↓
-        Document Collection
-              ↓
-          Text Chunking
-              ↓
-          Embeddings
-              ↓
-        Vector Database
-              ↓
-       Semantic Retrieval
-              ↓
-       Relevant Context
-              ↓
-          LLM / Agent
-              ↓
-        AI Response
+Raw Job Dataset
+      ↓
+Data Cleaning
+      ↓
+Job Filtering
+      ↓
+Job Chunking
+      ↓
+Sentence Transformer Embeddings
+      ↓
+FAISS Vector Index
+      ↓
+Semantic Retrieval
+      ↓
+Candidate-Job Matching
 ```
 
-Potential technologies for the future RAG layer include:
+### Technology
 
-* **Chroma**
-* **pgvector**
+| Component           | Technology             |
+| ------------------- | ---------------------- |
+| Embedding Model     | `all-MiniLM-L6-v2`     |
+| Embedding Dimension | 384                    |
+| Vector Database     | FAISS                  |
+| RAG Framework       | Custom Python pipeline |
+| Job Storage         | JSON                   |
+| Backend             | FastAPI                |
+| Database            | SQLite                 |
 
-RAG will allow the system to retrieve relevant information instead of depending only on the general knowledge of the language model.
+The current vector store contains:
 
+- **388 indexed vectors**
+- **384-dimensional embeddings**
 
+---
 
-# 🤖 Six Specialized AI Agents
+# 🎯 M2.3 Job-Resume Matching
 
-The planned system contains six specialized AI agents.
+The matching engine combines:
 
-| Agent                            | Responsibility                                                                         |
-| -------------------------------- | -------------------------------------------------------------------------------------- |
-| 🎯 **Job–Resume Matching Agent** | Compares the student's profile with internship requirements and provides a match score |
-| 📚 **Skill Gap Agent**           | Identifies missing or weak skills and recommends learning priorities                   |
-| 📝 **Resume Agent**              | Suggests improvements to the resume for a selected internship                          |
-| ✉️ **Cover Letter Agent**        | Generates personalized cover-letter drafts                                             |
-| 🎤 **Interview Agent**           | Generates interview questions and provides practice feedback                           |
-| 💼 **Career Assistant**          | Handles general internship and career-related questions                                |
+- Candidate summary
+- Candidate skills
+- Target role
+- Semantic retrieval similarity
+- Job requirements
+- Skill overlap
 
-The agents will use the structured candidate profile and, where required, information retrieved from the RAG knowledge base.
+The system retrieves candidate-relevant jobs using semantic search and then calculates a matching score for ranking.
 
-
-
-# 🔄 Multi-Agent Workflow
+### Matching workflow
 
 ```text
-                    Student Request
-                          │
-                          ▼
-                   ┌──────────────┐
-                   │ Orchestrator │
-                   └──────┬───────┘
-                          │
-        ┌─────────────────┼──────────────────┐
-        │        │        │        │         │
-        ▼        ▼        ▼        ▼         ▼
-     Matching  Skill    Resume   Cover     Interview
-      Agent    Gap      Agent    Letter      Agent
-               Agent             Agent
-        │        │        │        │         │
-        └────────┴────────┴────────┴─────────┘
-                          │
-                          ▼
-                 Career Assistant
-                          │
-                          ▼
-                Career Recommendations
+Candidate Resume
+       ↓
+Extracted Skills + Summary
+       ↓
+Target Role
+       ↓
+Semantic Query
+       ↓
+FAISS Retrieval
+       ↓
+Candidate-Job Scoring
+       ↓
+Ranked Recommendations
 ```
 
-The orchestrator/backend will determine which specialized agent should handle a particular student request.
+---
 
+# 📊 M2.4 Evaluation
 
+The matching pipeline was evaluated using **5 sample candidate profiles**.
+
+### Evaluation results
+
+- Profiles evaluated: **5**
+- Jobs in knowledge base: **102**
+- Matching results generated: **25**
+- Minimum observed match score: **54.33**
+- Maximum observed match score: **80.00**
+- Average observed match score: **65.61**
+
+The evaluation demonstrates that the complete retrieval and ranking pipeline is operational.
+
+The current evaluation is a **baseline evaluation**, not a claim of production-level accuracy.
+
+### Example
+
+For a Machine Learning candidate, the system retrieved roles including:
+
+- Data Science Intern
+- AIML Associate
+- Python Intern
+- AI/ML Intern
+- Data Scientist
+
+This demonstrates semantic retrieval beyond simple keyword matching.
+
+---
+
+# 🖥️ Career Companion Dashboard
+
+The frontend has been redesigned as a professional career platform.
+
+### Current sections
+
+- Dashboard
+- My Profile
+- My Resume
+- Recommended Jobs
+- Skill Gap
+- Interview Prep
+- Applications
+- Career Assistant
+- Settings
+
+### Current working functionality
+
+✅ Candidate profile creation
+✅ Resume upload
+✅ Resume analysis
+✅ Structured resume extraction
+✅ Internship/job retrieval
+✅ Semantic matching pipeline
+✅ Matching score generation
+✅ RAG-powered job search
+✅ Professional dashboard UI
+
+Some dashboard sections are currently placeholders for future milestones.
+
+---
 
 # 🛠️ Technology Stack
 
-| Layer                | Technology          |
-| -------------------- | ------------------- |
-| **Frontend**         | React + Vite        |
-| **Backend**          | FastAPI + Python    |
-| **Database**         | SQLite              |
-| **Resume Parsing**   | PyPDF + python-docx |
-| **LLM**              | Gemini              |
-| **File Storage**     | Local Storage       |
-| **Future RAG Store** | Chroma / pgvector   |
-| **Version Control**  | Git + GitHub        |
+## Frontend
 
+- React
+- Vite
+- JavaScript
+- CSS
 
+## Backend
+
+- Python
+- FastAPI
+- SQLite
+- Pydantic
+
+## AI / ML
+
+- Google Gemini
+- Sentence Transformers
+- FAISS
+- Semantic Search
+- Rule-based fallback extraction
+
+## Document Processing
+
+- PyPDF
+- python-docx
+
+## Development
+
+- Git
+- GitHub
+- VS Code
+- PowerShell
+
+---
 
 # 📁 Project Structure
 
 ```text
-AI-Career-Companion-Agent/
+ai-career-companion/
 │
 ├── backend/
-│   ├── main.py
-│   ├── README.md
-│   └── .gitignore
-│
-├── frontend/
-│   ├── src/
-│   │   ├── App.jsx
-│   │   ├── App.css
-│   │   ├── index.css
-│   │   └── main.jsx
+│   ├── data/
+│   │   ├── career_companion.db
+│   │   ├── uploads/
+│   │   └── vector_store/
+│   │       ├── jobs.index
+│   │       └── metadata.json
 │   │
-│   ├── public/
-│   ├── package.json
-│   ├── package-lock.json
-│   └── README.md
+│   ├── matching/
+│   │   ├── matcher.py
+│   │   ├── service.py
+│   │   └── job_loader.py
+│   │
+│   ├── rag/
+│   │   ├── loader.py
+│   │   ├── chunker.py
+│   │   ├── embeddings.py
+│   │   ├── vector_store.py
+│   │   ├── retriever.py
+│   │   └── test_retrieval.py
+│   │
+│   ├── main.py
+│   └── .env
+│
+├── data/
+│   ├── raw/
+│   └── processed/
+│       └── internship_jobs.json
 │
 ├── docs/
-│   ├── Research-and-Technical-Understanding.pdf
-│   ├── System-Architecture.pdf
-│   ├── architecture-diagram.png
-│   ├── database schema.jpeg
-│   └── work flow diagram.jpeg
+│   └── M2_EVALUATION_RESULTS.md
 │
-└── README.md
+├── frontend/
+│   └── src/
+│       ├── App.jsx
+│       └── App.css
+│
+├── README.md
+└── requirements.txt
 ```
 
+> `.env`, databases, uploaded resumes, and other sensitive/local files should not be committed to GitHub.
 
+---
 
-# 🚧 Milestone 1
+# ▶️ Running the Project
 
-The first milestone focuses on establishing the candidate-profile and resume-processing foundation.
+## 1. Start the backend
 
-### Completed / Planned Foundation
+Open PowerShell:
 
-* [x] Project repository setup
-* [x] Frontend project setup
-* [x] Backend project setup
-* [x] Initial system architecture
-* [x] Database schema design
-* [x] Research and technical understanding documentation
-* [ ] Student profile creation
-* [ ] Profile validation
-* [ ] Resume upload
-* [ ] Resume metadata storage
-* [ ] PDF resume parsing
-* [ ] DOCX resume parsing
-* [ ] TXT resume processing
-* [ ] Gemini-based structured extraction
-* [ ] Structured resume storage
+```powershell
+cd D:\infosys\ai-career-companion
+```
 
-### Future Milestones
+Activate the virtual environment if required and start FastAPI:
 
-* [ ] RAG knowledge base
-* [ ] Internship/job data integration
-* [ ] Job–Resume Matching Agent
-* [ ] Skill Gap Agent
-* [ ] Resume Agent
-* [ ] Cover Letter Agent
-* [ ] Interview Agent
-* [ ] Career Assistant
-* [ ] Application tracking
-* [ ] Personalized career recommendations
+```powershell
+uvicorn backend.main:app --reload --port 8000
+```
 
-
-
-# 📚 Documentation
-
-The project documentation is available in the [`docs`](./docs) directory.
-
-### Research and Technical Understanding
-
-Contains research on:
-
-* Internship application workflow
-* Retrieval-Augmented Generation
-* Multi-agent systems
-* System architecture
-* Database design
-* Technology selection
-* Milestone 1 scope
-
-### System Architecture
-
-Contains the detailed architecture and workflow of the proposed system.
-
-
-
-# 🎯 Expected Outcome
-
-The final system aims to provide students with a single AI-powered platform for internship preparation.
-
-The platform will eventually support:
+Backend:
 
 ```text
-Student Profile
-      ↓
-Resume Analysis
-      ↓
-Internship Matching
-      ↓
-Skill Gap Identification
-      ↓
-Resume Improvement
-      ↓
-Cover Letter Generation
-      ↓
-Interview Preparation
-      ↓
-Career Guidance
+http://127.0.0.1:8000
 ```
 
-This approach is intended to make internship preparation more organized, personalized, and efficient.
+API documentation:
 
+```text
+http://127.0.0.1:8000/docs
+```
 
+Health check:
 
-# 🔮 Future Enhancements
+```text
+http://127.0.0.1:8000/health
+```
 
-Possible future improvements include:
+---
 
-* Integration with live internship/job sources
-* PostgreSQL for scalable database storage
-* Cloud-based resume storage
-* Advanced semantic search
-* Personalized learning recommendations
-* Mock interview sessions
-* Application tracking dashboard
-* Analytics on application progress
-* Authentication and user accounts
-* Deployment using cloud infrastructure
-* Additional specialized career agents
+## 2. Start the frontend
 
+Open a second PowerShell window:
 
+```powershell
+cd D:\infosys\ai-career-companion\frontend
+npm run dev
+```
 
-# 📌 Conclusion
+Frontend:
 
-The **AI Career Companion Agent** provides a structured approach to helping students navigate the internship process.
+```text
+http://localhost:5173
+```
 
-The initial milestone establishes the core candidate-profile and resume-processing pipeline. The system uses **React and Vite** for the frontend, **FastAPI and Python** for the backend, **SQLite** for initial data storage, and **Gemini/LLM** technology for structured resume extraction.
+---
 
-The future integration of **RAG** will allow the system to retrieve relevant internship and career information, while the **six specialized AI agents** will provide personalized assistance for job matching, skill-gap analysis, resume improvement, cover letters, interview preparation, and general career guidance.
+# 🔐 Environment Variables
 
-The architecture is designed to be modular and extensible so that additional AI capabilities, data sources, and production infrastructure can be added in future milestones.
+Create:
 
-## 👩‍💻 Project
+```text
+backend/.env
+```
 
-**AI Career Companion Agent**
+Example:
 
-**Developed as part of the Infosys Internship Project**
+```env
+GEMINI_API_KEY=your_api_key_here
+GEMINI_MODEL=gemini-3.6-flash
+```
 
-**Repository:** [AI-Career-Companion-Agent](https://github.com/Fatima-yadwad/AI-Career-Companion-Agent)
+**Never commit the real API key to GitHub.**
+
+---
+
+# 📈 Current Development Status
+
+| Milestone                 | Status         |
+| ------------------------- | -------------- |
+| M1.1 Research             | ✅ Completed   |
+| M1.2 Architecture         | ✅ Completed   |
+| M1.3 Student Profile      | ✅ Completed   |
+| M1.4 Resume Parsing       | ✅ Completed   |
+| M2.1 Dataset Preparation  | ✅ Completed   |
+| M2.2 RAG Pipeline         | ✅ Completed   |
+| M2.3 Job-Resume Matching  | ✅ Completed   |
+| M2.4 Evaluation           | ✅ Completed   |
+| Professional Dashboard UI | ✅ Implemented |
+| Skill Gap Agent           | 🔄 Planned     |
+| Resume Agent              | 🔄 Planned     |
+| Cover Letter Agent        | 🔄 Planned     |
+| Interview Agent           | 🔄 Planned     |
+| Career Assistant Agent    | 🔄 Planned     |
+| Application Tracking      | 🔄 Planned     |
+
+---
+
+# 🔮 Future Roadmap
+
+### Milestone 3 — Skill Intelligence
+
+- Skill Gap Agent
+- Role-specific skill analysis
+- Learning recommendations
+- Candidate skill progression
+
+### Milestone 4 — Application Assistance
+
+- Resume tailoring
+- Cover letter generation
+- Job-specific application assistance
+- Application tracking
+
+### Milestone 5 — Interview Intelligence
+
+- Personalized interview questions
+- Technical interview preparation
+- Behavioral interview preparation
+- AI interview simulation
+- Interview feedback
+
+### Milestone 6 — Career Assistant
+
+- Multi-agent orchestration
+- Personalized career recommendations
+- Conversational career assistant
+- End-to-end internship preparation workflow
+
+---
+
+# 🎓 Project Goal
+
+The ultimate goal is to transform the traditional internship search process into an **AI-assisted career workflow** where a student can:
+
+```text
+Upload Resume
+      ↓
+Understand Skills
+      ↓
+Discover Relevant Jobs
+      ↓
+Identify Skill Gaps
+      ↓
+Improve Resume
+      ↓
+Generate Cover Letter
+      ↓
+Prepare for Interview
+      ↓
+Track Applications
+      ↓
+Receive Career Guidance
+```
+
+---
+
+# 👩‍💻 Project
+
+**AI Career Companion Agent for Internship Matching and Interview Preparation**
+
+Developed as part of the **Infosys Springboard Virtual Internship**.
+
+---
+
+## 📄 Documentation
+
+Detailed M2 evaluation results are available in:
+
+```text
+docs/M2_EVALUATION_RESULTS.md
+```
+
+The evaluation document contains the dataset statistics, RAG configuration, candidate profiles, matching results, and observations from the baseline evaluation.
