@@ -1,7 +1,8 @@
 import { useState } from "react";
 import "./App.css";
 
-const API_BASE_URL = "http://127.0.0.1:8000";
+// Backend is running on port 8001
+const API_BASE_URL = "http://127.0.0.1:8001";
 
 function App() {
   const [page, setPage] = useState("dashboard");
@@ -211,9 +212,13 @@ function App() {
       );
 
       setJobs(data.results || []);
+
       setMessage(
-        `RAG retrieved ${data.result_count || data.results?.length || 0} relevant jobs.`
+        `RAG retrieved ${
+          data.result_count || data.results?.length || 0
+        } relevant jobs.`
       );
+
       setPage("jobs");
     } catch (err) {
       setError(`Job search failed: ${err.message}`);
@@ -248,11 +253,15 @@ function App() {
         <nav className="landing-nav">
           <div className="brand">
             <div className="brand-icon">✦</div>
-            <span>Career<span>Companion</span></span>
+
+            <span>
+              Career<span>Companion</span>
+            </span>
           </div>
 
           <div className="landing-nav-right">
             <span>AI-powered career guidance</span>
+
             <button
               className="nav-login"
               onClick={() => setShowOnboarding(false)}
@@ -309,6 +318,7 @@ function App() {
             <div className="floating-card profile-preview">
               <div className="preview-top">
                 <div className="avatar">AI</div>
+
                 <div>
                   <strong>Career Profile</strong>
                   <small>AI-generated insights</small>
@@ -336,6 +346,7 @@ function App() {
 
             <div className="floating-card match-preview">
               <div className="match-icon">🎯</div>
+
               <div>
                 <small>Best Match</small>
                 <strong>AI/ML Intern</strong>
@@ -349,19 +360,25 @@ function App() {
           <div>
             <span>01</span>
             <strong>Analyze</strong>
-            <p>AI extracts your skills and experience from your resume.</p>
+            <p>
+              AI extracts your skills and experience from your resume.
+            </p>
           </div>
 
           <div>
             <span>02</span>
             <strong>Match</strong>
-            <p>Find internships that actually fit your profile.</p>
+            <p>
+              Find internships that actually fit your profile.
+            </p>
           </div>
 
           <div>
             <span>03</span>
             <strong>Improve</strong>
-            <p>Identify skill gaps and prepare for your next interview.</p>
+            <p>
+              Identify skill gaps and prepare for your next interview.
+            </p>
           </div>
         </div>
       </div>
@@ -376,6 +393,7 @@ function App() {
     <aside className="sidebar">
       <div className="sidebar-brand">
         <div className="brand-icon">✦</div>
+
         <div>
           <strong>CareerCompanion</strong>
           <small>AI Career Platform</small>
@@ -386,7 +404,11 @@ function App() {
         <span className="sidebar-label">WORKSPACE</span>
 
         <button
-          className={page === "dashboard" ? "side-item active" : "side-item"}
+          className={
+            page === "dashboard"
+              ? "side-item active"
+              : "side-item"
+          }
           onClick={() => navigate("dashboard")}
         >
           <span>⌂</span>
@@ -394,7 +416,11 @@ function App() {
         </button>
 
         <button
-          className={page === "profile" ? "side-item active" : "side-item"}
+          className={
+            page === "profile"
+              ? "side-item active"
+              : "side-item"
+          }
           onClick={() => navigate("profile")}
         >
           <span>◉</span>
@@ -402,7 +428,11 @@ function App() {
         </button>
 
         <button
-          className={page === "resume" ? "side-item active" : "side-item"}
+          className={
+            page === "resume"
+              ? "side-item active"
+              : "side-item"
+          }
           onClick={() => navigate("resume")}
         >
           <span>▣</span>
@@ -410,7 +440,11 @@ function App() {
         </button>
 
         <button
-          className={page === "jobs" ? "side-item active" : "side-item"}
+          className={
+            page === "jobs"
+              ? "side-item active"
+              : "side-item"
+          }
           onClick={() => navigate("jobs")}
         >
           <span>✦</span>
@@ -423,7 +457,11 @@ function App() {
         <span className="sidebar-label">GROWTH</span>
 
         <button
-          className={page === "skills" ? "side-item active" : "side-item"}
+          className={
+            page === "skills"
+              ? "side-item active"
+              : "side-item"
+          }
           onClick={() => navigate("skills")}
         >
           <span>◇</span>
@@ -431,7 +469,11 @@ function App() {
         </button>
 
         <button
-          className={page === "interview" ? "side-item active" : "side-item"}
+          className={
+            page === "interview"
+              ? "side-item active"
+              : "side-item"
+          }
           onClick={() => navigate("interview")}
         >
           <span>◎</span>
@@ -439,7 +481,11 @@ function App() {
         </button>
 
         <button
-          className={page === "applications" ? "side-item active" : "side-item"}
+          className={
+            page === "applications"
+              ? "side-item active"
+              : "side-item"
+          }
           onClick={() => navigate("applications")}
         >
           <span>✓</span>
@@ -451,7 +497,11 @@ function App() {
         <span className="sidebar-label">ASSISTANCE</span>
 
         <button
-          className={page === "assistant" ? "side-item active" : "side-item"}
+          className={
+            page === "assistant"
+              ? "side-item active"
+              : "side-item"
+          }
           onClick={() => navigate("assistant")}
         >
           <span>✧</span>
@@ -474,7 +524,9 @@ function App() {
 
           <div>
             <strong>{profile.full_name || "Student"}</strong>
-            <small>{profile.target_role || "Career Explorer"}</small>
+            <small>
+              {profile.target_role || "Career Explorer"}
+            </small>
           </div>
         </div>
       </div>
@@ -489,6 +541,7 @@ function App() {
     <header className="topbar">
       <div>
         <span className="breadcrumb">Career Companion</span>
+
         <h2>
           {page === "dashboard" && "Dashboard"}
           {page === "profile" && "My Profile"}
@@ -524,7 +577,9 @@ function App() {
     <div className="page-content">
       <section className="welcome-banner">
         <div>
-          <div className="welcome-eyebrow">WELCOME BACK</div>
+          <div className="welcome-eyebrow">
+            WELCOME BACK
+          </div>
 
           <h1>
             {profile.full_name
@@ -543,7 +598,9 @@ function App() {
               navigate(profileId ? "resume" : "profile")
             }
           >
-            {profileId ? "Manage My Resume →" : "Create My Profile →"}
+            {profileId
+              ? "Manage My Resume →"
+              : "Create My Profile →"}
           </button>
         </div>
 
@@ -558,25 +615,40 @@ function App() {
       <div className="dashboard-heading">
         <div>
           <h2>Your Career Overview</h2>
-          <p>Everything you need to move toward your next opportunity.</p>
+          <p>
+            Everything you need to move toward your next opportunity.
+          </p>
         </div>
       </div>
 
       <div className="stats-grid">
         <div className="stat-card">
           <div className="stat-icon purple">◉</div>
+
           <div>
             <small>PROFILE STATUS</small>
-            <strong>{profileId ? "Complete" : "Not Started"}</strong>
-            <span>{profileId ? "✓ Profile created" : "Create your profile"}</span>
+            <strong>
+              {profileId ? "Complete" : "Not Started"}
+            </strong>
+
+            <span>
+              {profileId
+                ? "✓ Profile created"
+                : "Create your profile"}
+            </span>
           </div>
         </div>
 
         <div className="stat-card">
           <div className="stat-icon blue">▣</div>
+
           <div>
             <small>RESUME STATUS</small>
-            <strong>{resumeResult ? "Analyzed" : "Pending"}</strong>
+
+            <strong>
+              {resumeResult ? "Analyzed" : "Pending"}
+            </strong>
+
             <span>
               {resumeResult
                 ? "✓ AI analysis complete"
@@ -587,18 +659,28 @@ function App() {
 
         <div className="stat-card">
           <div className="stat-icon green">✦</div>
+
           <div>
             <small>JOB MATCHING</small>
+
             <strong>{jobs.length || "—"}</strong>
-            <span>Recommended opportunities</span>
+
+            <span>
+              Recommended opportunities
+            </span>
           </div>
         </div>
 
         <div className="stat-card">
           <div className="stat-icon orange">◇</div>
+
           <div>
             <small>SKILLS DETECTED</small>
-            <strong>{extraction?.skills?.length || "—"}</strong>
+
+            <strong>
+              {extraction?.skills?.length || "—"}
+            </strong>
+
             <span>From your resume</span>
           </div>
         </div>
@@ -609,15 +691,24 @@ function App() {
           <div className="panel-heading">
             <div>
               <h3>Career Journey</h3>
-              <p>Complete these steps to unlock your AI career tools.</p>
+              <p>
+                Complete these steps to unlock your AI career tools.
+              </p>
             </div>
           </div>
 
           <div className="journey">
-            <div className={profileId ? "journey-step done" : "journey-step"}>
+            <div
+              className={
+                profileId
+                  ? "journey-step done"
+                  : "journey-step"
+              }
+            >
               <div className="journey-number">
                 {profileId ? "✓" : "1"}
               </div>
+
               <div>
                 <strong>Create your profile</strong>
                 <p>Add your basic career information.</p>
@@ -626,31 +717,42 @@ function App() {
 
             <div
               className={
-                resumeResult ? "journey-step done" : "journey-step"
+                resumeResult
+                  ? "journey-step done"
+                  : "journey-step"
               }
             >
               <div className="journey-number">
                 {resumeResult ? "✓" : "2"}
               </div>
+
               <div>
                 <strong>Analyze your resume</strong>
-                <p>Let AI understand your experience and skills.</p>
+                <p>
+                  Let AI understand your experience and skills.
+                </p>
               </div>
             </div>
 
             <div className="journey-step">
               <div className="journey-number">3</div>
+
               <div>
                 <strong>Discover internships</strong>
-                <p>Get personalized job recommendations.</p>
+                <p>
+                  Get personalized job recommendations.
+                </p>
               </div>
             </div>
 
             <div className="journey-step">
               <div className="journey-number">4</div>
+
               <div>
                 <strong>Prepare & improve</strong>
-                <p>Close skill gaps and practice interviews.</p>
+                <p>
+                  Close skill gaps and practice interviews.
+                </p>
               </div>
             </div>
           </div>
@@ -660,8 +762,11 @@ function App() {
           <div className="panel-heading">
             <div>
               <h3>AI Career Insight</h3>
-              <p>Your intelligent career assistant.</p>
+              <p>
+                Your intelligent career assistant.
+              </p>
             </div>
+
             <span className="sparkle">✦</span>
           </div>
 
@@ -677,7 +782,9 @@ function App() {
             <button
               className="insight-button"
               onClick={() =>
-                navigate(resumeResult ? "jobs" : "resume")
+                navigate(
+                  resumeResult ? "jobs" : "resume"
+                )
               }
             >
               {resumeResult
@@ -719,7 +826,9 @@ function App() {
       <div className="page-intro">
         <div>
           <span className="eyebrow-small">PROFILE</span>
+
           <h1>Tell us about yourself</h1>
+
           <p>
             Your profile helps Career Companion personalize internship
             recommendations and career guidance.
@@ -731,6 +840,7 @@ function App() {
         <form onSubmit={createProfile}>
           <div className="form-section-title">
             <span>01</span>
+
             <div>
               <h3>Personal Information</h3>
               <p>Basic information about you.</p>
@@ -740,6 +850,7 @@ function App() {
           <div className="modern-form-grid">
             <div className="modern-field">
               <label>Full Name *</label>
+
               <input
                 name="full_name"
                 value={profile.full_name}
@@ -751,6 +862,7 @@ function App() {
 
             <div className="modern-field">
               <label>Email Address *</label>
+
               <input
                 type="email"
                 name="email"
@@ -763,6 +875,7 @@ function App() {
 
             <div className="modern-field">
               <label>Phone Number</label>
+
               <input
                 name="phone"
                 value={profile.phone}
@@ -773,6 +886,7 @@ function App() {
 
             <div className="modern-field">
               <label>Location</label>
+
               <input
                 name="location"
                 value={profile.location}
@@ -784,15 +898,19 @@ function App() {
 
           <div className="form-section-title second">
             <span>02</span>
+
             <div>
               <h3>Career Preferences</h3>
-              <p>Tell us what kind of opportunity you want.</p>
+              <p>
+                Tell us what kind of opportunity you want.
+              </p>
             </div>
           </div>
 
           <div className="modern-form-grid">
             <div className="modern-field">
               <label>Target Role</label>
+
               <input
                 name="target_role"
                 value={profile.target_role}
@@ -803,6 +921,7 @@ function App() {
 
             <div className="modern-field">
               <label>LinkedIn Profile</label>
+
               <input
                 type="url"
                 name="linkedin_url"
@@ -818,7 +937,9 @@ function App() {
             className="dashboard-primary"
             disabled={loading}
           >
-            {loading ? "Saving Profile..." : "Save Profile →"}
+            {loading
+              ? "Saving Profile..."
+              : "Save Profile →"}
           </button>
         </form>
       </section>
@@ -833,8 +954,12 @@ function App() {
     <div className="page-content">
       <div className="page-intro">
         <div>
-          <span className="eyebrow-small">RESUME INTELLIGENCE</span>
+          <span className="eyebrow-small">
+            RESUME INTELLIGENCE
+          </span>
+
           <h1>My Resume</h1>
+
           <p>
             Upload your resume and let AI transform it into a structured
             career profile.
@@ -843,15 +968,15 @@ function App() {
 
         {resumeResult && (
           <div
-            className={
-              resumeResult.extraction_method === "gemini_llm"
-                ? "ai-status"
-                : "fallback-status"
-            }
+              className={
+              resumeResult.extraction_method === "gemini"
+              ? "ai-status"
+              : "fallback-status"
+              }
           >
-            {resumeResult.extraction_method === "gemini_llm"
-              ? "✦ Gemini AI Analysis"
-              : "⚙ Local Analysis"}
+            {resumeResult.extraction_method === "gemini"
+            ? "✦ Gemini AI Analysis"
+            : "⚙ Local Analysis"}
           </div>
         )}
       </div>
@@ -859,12 +984,16 @@ function App() {
       {!profileId && (
         <div className="notice-card">
           <span>!</span>
+
           <div>
             <strong>Create your profile first</strong>
+
             <p>
-              A student profile is required before a resume can be uploaded.
+              A student profile is required before a resume can be
+              uploaded.
             </p>
           </div>
+
           <button onClick={() => navigate("profile")}>
             Create Profile →
           </button>
@@ -876,20 +1005,26 @@ function App() {
           <section className="resume-upload-card">
             <div className="upload-visual">
               <div className="document-icon">▤</div>
+
               <div>
                 <h3>Upload your latest resume</h3>
-                <p>PDF, DOCX or TXT · Your file stays in your local backend.</p>
+
+                <p>
+                  PDF, DOCX or TXT · Your file stays in your local backend.
+                </p>
               </div>
             </div>
 
             <form onSubmit={uploadResume}>
               <label className="modern-upload">
                 <div className="upload-cloud">↑</div>
+
                 <strong>
                   {selectedFile
                     ? selectedFile.name
                     : "Choose a resume file"}
                 </strong>
+
                 <span>
                   {selectedFile
                     ? "Ready to analyze"
@@ -923,19 +1058,27 @@ function App() {
             <section className="resume-analysis">
               <div className="analysis-header">
                 <div>
-                  <span className="eyebrow-small">AI EXTRACTION</span>
+                  <span className="eyebrow-small">
+                    AI EXTRACTION
+                  </span>
+
                   <h2>Your Candidate Profile</h2>
                 </div>
 
-                <span className="analysis-complete">✓ Complete</span>
+                <span className="analysis-complete">
+                  ✓ Complete
+                </span>
               </div>
 
               <div className="summary-highlight">
                 <div className="summary-symbol">✦</div>
+
                 <div>
                   <small>PROFESSIONAL SUMMARY</small>
+
                   <p>
-                    {extraction.summary || "No summary detected."}
+                    {extraction.summary ||
+                      "No summary detected."}
                   </p>
                 </div>
               </div>
@@ -946,11 +1089,15 @@ function App() {
 
                   <div className="skill-cloud">
                     {extraction.skills?.length ? (
-                      extraction.skills.map((skill, index) => (
-                        <span key={index}>{skill}</span>
-                      ))
+                      extraction.skills.map(
+                        (skill, index) => (
+                          <span key={index}>{skill}</span>
+                        )
+                      )
                     ) : (
-                      <p className="empty">No skills detected.</p>
+                      <p className="empty">
+                        No skills detected.
+                      </p>
                     )}
                   </div>
                 </div>
@@ -959,17 +1106,30 @@ function App() {
                   <h3>🎓 Education</h3>
 
                   {extraction.education?.length ? (
-                    extraction.education.map((item, index) => (
-                      <div className="analysis-item" key={index}>
-                        <strong>
-                          {item.degree || "Education"}
-                        </strong>
-                        <p>{item.institution || ""}</p>
-                        {item.year && <small>{item.year}</small>}
-                      </div>
-                    ))
+                    extraction.education.map(
+                      (item, index) => (
+                        <div
+                          className="analysis-item"
+                          key={index}
+                        >
+                          <strong>
+                            {item.degree || "Education"}
+                          </strong>
+
+                          <p>
+                            {item.institution || ""}
+                          </p>
+
+                          {item.year && (
+                            <small>{item.year}</small>
+                          )}
+                        </div>
+                      )
+                    )
                   ) : (
-                    <p className="empty">No education detected.</p>
+                    <p className="empty">
+                      No education detected.
+                    </p>
                   )}
                 </div>
 
@@ -977,19 +1137,32 @@ function App() {
                   <h3>💼 Experience</h3>
 
                   {extraction.experience?.length ? (
-                    extraction.experience.map((item, index) => (
-                      <div className="analysis-item" key={index}>
-                        <strong>
-                          {item.role || "Experience"}
-                        </strong>
-                        <p>{item.company || ""}</p>
-                        {item.duration && (
-                          <small>{item.duration}</small>
-                        )}
-                      </div>
-                    ))
+                    extraction.experience.map(
+                      (item, index) => (
+                        <div
+                          className="analysis-item"
+                          key={index}
+                        >
+                          <strong>
+                            {item.role || "Experience"}
+                          </strong>
+
+                          <p>
+                            {item.company || ""}
+                          </p>
+
+                          {item.duration && (
+                            <small>
+                              {item.duration}
+                            </small>
+                          )}
+                        </div>
+                      )
+                    )
                   ) : (
-                    <p className="empty">No experience detected.</p>
+                    <p className="empty">
+                      No experience detected.
+                    </p>
                   )}
                 </div>
 
@@ -997,24 +1170,36 @@ function App() {
                   <h3>🚀 Projects</h3>
 
                   {extraction.projects?.length ? (
-                    extraction.projects.map((project, index) => (
-                      <div className="analysis-item" key={index}>
-                        <strong>
-                          {project.name || "Project"}
-                        </strong>
-                        <p>{project.description || ""}</p>
+                    extraction.projects.map(
+                      (project, index) => (
+                        <div
+                          className="analysis-item"
+                          key={index}
+                        >
+                          <strong>
+                            {project.name || "Project"}
+                          </strong>
 
-                        <div className="mini-tags">
-                          {project.technologies?.map(
-                            (tech, techIndex) => (
-                              <span key={techIndex}>{tech}</span>
-                            )
-                          )}
+                          <p>
+                            {project.description || ""}
+                          </p>
+
+                          <div className="mini-tags">
+                            {project.technologies?.map(
+                              (tech, techIndex) => (
+                                <span key={techIndex}>
+                                  {tech}
+                                </span>
+                              )
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      )
+                    )
                   ) : (
-                    <p className="empty">No projects detected.</p>
+                    <p className="empty">
+                      No projects detected.
+                    </p>
                   )}
                 </div>
               </div>
@@ -1033,8 +1218,12 @@ function App() {
     <div className="page-content">
       <div className="page-intro jobs-intro">
         <div>
-          <span className="eyebrow-small">M2 · INTELLIGENT MATCHING</span>
+          <span className="eyebrow-small">
+            M2 · INTELLIGENT MATCHING
+          </span>
+
           <h1>Recommended Internships</h1>
+
           <p>
             Opportunities retrieved and ranked using your profile, skills,
             target role, and semantic job similarity.
@@ -1046,19 +1235,24 @@ function App() {
           onClick={getRecommendedJobs}
           disabled={loading}
         >
-          {loading ? "Finding Matches..." : "Refresh Matches ↻"}
+          {loading
+            ? "Finding Matches..."
+            : "Refresh Matches ↻"}
         </button>
       </div>
 
       {!profileId && (
         <div className="notice-card">
           <span>!</span>
+
           <div>
             <strong>Create your student profile</strong>
+
             <p>
               Personalized matching needs your profile and resume data.
             </p>
           </div>
+
           <button onClick={() => navigate("profile")}>
             Get Started →
           </button>
@@ -1068,11 +1262,14 @@ function App() {
       {profileId && !resumeResult && (
         <div className="empty-state-large">
           <div>▤</div>
+
           <h2>Upload your resume first</h2>
+
           <p>
             Career Companion needs your skills and experience to calculate
             personalized internship matches.
           </p>
+
           <button
             className="dashboard-primary"
             onClick={() => navigate("resume")}
@@ -1086,11 +1283,18 @@ function App() {
         <div className="jobs-list">
           <div className="results-header">
             <div>
-              <strong>{jobs.length} opportunities</strong>
-              <span>ranked for your profile</span>
+              <strong>
+                {jobs.length} opportunities
+              </strong>
+
+              <span>
+                ranked for your profile
+              </span>
             </div>
 
-            <div className="powered-badge">✦ AI MATCHING</div>
+            <div className="powered-badge">
+              ✦ AI MATCHING
+            </div>
           </div>
 
           {jobs.map((job, index) => {
@@ -1128,8 +1332,13 @@ function App() {
               [];
 
             return (
-              <div className="job-card" key={index}>
-                <div className="job-rank">{index + 1}</div>
+              <div
+                className="job-card"
+                key={index}
+              >
+                <div className="job-rank">
+                  {index + 1}
+                </div>
 
                 <div className="company-logo">
                   {company.charAt(0).toUpperCase()}
@@ -1143,14 +1352,20 @@ function App() {
                     </div>
 
                     <div className="match-score">
-                      <strong>{score.toFixed(0)}%</strong>
+                      <strong>
+                        {score.toFixed(0)}%
+                      </strong>
+
                       <span>Match</span>
                     </div>
                   </div>
 
                   <div className="job-meta">
                     <span>⌖ {location}</span>
-                    <span>◷ Internship / Early Career</span>
+
+                    <span>
+                      ◷ Internship / Early Career
+                    </span>
                   </div>
 
                   {matchedSkills.length > 0 && (
@@ -1158,11 +1373,16 @@ function App() {
                       <small>MATCHED SKILLS</small>
 
                       <div>
-                        {matchedSkills.slice(0, 5).map((skill, i) => (
-                          <span className="matched" key={i}>
-                            ✓ {skill}
-                          </span>
-                        ))}
+                        {matchedSkills
+                          .slice(0, 5)
+                          .map((skill, i) => (
+                            <span
+                              className="matched"
+                              key={i}
+                            >
+                              ✓ {skill}
+                            </span>
+                          ))}
                       </div>
                     </div>
                   )}
@@ -1172,18 +1392,26 @@ function App() {
                       <small>SKILL GAPS</small>
 
                       <div>
-                        {missingSkills.slice(0, 4).map((skill, i) => (
-                          <span className="missing" key={i}>
-                            + {skill}
-                          </span>
-                        ))}
+                        {missingSkills
+                          .slice(0, 4)
+                          .map((skill, i) => (
+                            <span
+                              className="missing"
+                              key={i}
+                            >
+                              + {skill}
+                            </span>
+                          ))}
                       </div>
                     </div>
                   )}
 
                   {job.reasoning && (
                     <div className="why-match">
-                      <strong>✦ Why this match?</strong>
+                      <strong>
+                        ✦ Why this match?
+                      </strong>
+
                       <p>{job.reasoning}</p>
                     </div>
                   )}
@@ -1198,21 +1426,29 @@ function App() {
         </div>
       )}
 
-      {profileId && resumeResult && jobs.length === 0 && !loading && (
-        <div className="empty-state-large">
-          <div>🎯</div>
-          <h2>No recommendations loaded yet</h2>
-          <p>
-            Click refresh to run the personalized matching engine.
-          </p>
-          <button
-            className="dashboard-primary"
-            onClick={getRecommendedJobs}
-          >
-            Find My Matches →
-          </button>
-        </div>
-      )}
+      {profileId &&
+        resumeResult &&
+        jobs.length === 0 &&
+        !loading && (
+          <div className="empty-state-large">
+            <div>🎯</div>
+
+            <h2>
+              No recommendations loaded yet
+            </h2>
+
+            <p>
+              Click refresh to run the personalized matching engine.
+            </p>
+
+            <button
+              className="dashboard-primary"
+              onClick={getRecommendedJobs}
+            >
+              Find My Matches →
+            </button>
+          </div>
+        )}
     </div>
   );
 
@@ -1234,6 +1470,7 @@ function App() {
           "Get personalized learning recommendations",
         ],
       },
+
       interview: {
         icon: "◎",
         label: "INTERVIEW INTELLIGENCE",
@@ -1246,6 +1483,7 @@ function App() {
           "Technical and behavioral preparation",
         ],
       },
+
       applications: {
         icon: "✓",
         label: "APPLICATION TRACKER",
@@ -1258,6 +1496,7 @@ function App() {
           "Never lose track of a deadline",
         ],
       },
+
       assistant: {
         icon: "✧",
         label: "AI CAREER ASSISTANT",
@@ -1277,9 +1516,16 @@ function App() {
     return (
       <div className="page-content">
         <div className="coming-hero">
-          <div className="coming-icon">{data.icon}</div>
-          <span className="eyebrow-small">{data.label}</span>
+          <div className="coming-icon">
+            {data.icon}
+          </div>
+
+          <span className="eyebrow-small">
+            {data.label}
+          </span>
+
           <h1>{data.title}</h1>
+
           <p>{data.description}</p>
 
           <div className="coming-status">
@@ -1289,16 +1535,25 @@ function App() {
         </div>
 
         <div className="planned-grid">
-          {data.features.map((feature, index) => (
-            <div className="planned-card" key={index}>
-              <span>0{index + 1}</span>
-              <strong>{feature}</strong>
-              <p>
-                This capability will be connected to your personalized
-                career intelligence layer.
-              </p>
-            </div>
-          ))}
+          {data.features.map(
+            (feature, index) => (
+              <div
+                className="planned-card"
+                key={index}
+              >
+                <span>
+                  0{index + 1}
+                </span>
+
+                <strong>{feature}</strong>
+
+                <p>
+                  This capability will be connected to your personalized
+                  career intelligence layer.
+                </p>
+              </div>
+            )
+          )}
         </div>
       </div>
     );
@@ -1328,14 +1583,25 @@ function App() {
         )}
 
         {page === "dashboard" && <Dashboard />}
+
         {page === "profile" && <ProfilePage />}
+
         {page === "resume" && <ResumePage />}
+
         {page === "jobs" && <JobsPage />}
-        {page === "skills" && <FeaturePage type="skills" />}
-        {page === "interview" && <FeaturePage type="interview" />}
+
+        {page === "skills" && (
+          <FeaturePage type="skills" />
+        )}
+
+        {page === "interview" && (
+          <FeaturePage type="interview" />
+        )}
+
         {page === "applications" && (
           <FeaturePage type="applications" />
         )}
+
         {page === "assistant" && (
           <FeaturePage type="assistant" />
         )}
@@ -1343,7 +1609,9 @@ function App() {
         <footer className="platform-footer">
           <span>AI Career Companion</span>
           <span>Milestone 2 Prototype</span>
-          <span>RAG • AI Matching • Resume Intelligence</span>
+          <span>
+            RAG • AI Matching • Resume Intelligence
+          </span>
         </footer>
       </div>
     </div>
