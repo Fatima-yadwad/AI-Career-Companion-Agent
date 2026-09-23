@@ -25,11 +25,16 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 # ============================================================
-# RAG + MATCHING IMPORTS
+# RAG + MATCHING + M3 AGENT IMPORTS
 # ============================================================
 
 from backend.rag.retriever import JobRetriever
 from backend.matching.service import MatchingService
+from backend.matching.job_loader import get_jobs_by_id, load_all_jobs
+from backend.agents.skill_gap_agent import skill_gap_agent
+from backend.agents.application_agent import application_agent
+from backend.agents.interview_agent import interview_agent
+from backend.agents.career_assistant import career_assistant
 
 
 # ============================================================
@@ -40,8 +45,8 @@ DATA_DIR = BASE_DIR / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 DATABASE = DATA_DIR / "career_companion.db"
 
-DATA_DIR.mkdir(exist_ok=True)
-UPLOAD_DIR.mkdir(exist_ok=True)
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ============================================================
@@ -87,7 +92,7 @@ load_env()
 
 app = FastAPI(
     title="AI Career Companion Agent",
-    version="0.4.0"
+    version="0.6.0"
 )
 
 
@@ -116,7 +121,7 @@ matching_service = None
 
 
 # ============================================================
-# PROFILE MODEL
+# PYDANTIC MODELS
 # ============================================================
 
 class ProfileInput(BaseModel):
@@ -128,21 +133,53 @@ class ProfileInput(BaseModel):
     linkedin_url: str | None = None
 
 
-# ============================================================
-# JOB SEARCH MODEL
-# ============================================================
-
 class JobSearchInput(BaseModel):
     query: str
     top_k: int = 5
 
 
-# ============================================================
-# JOB MATCH MODEL
-# ============================================================
-
 class JobMatchInput(BaseModel):
     top_k: int = 5
+
+
+class SkillGapInput(BaseModel):
+    job_id: str | None = None
+    job_title: str | None = None
+
+
+class ResumeCustomizationInput(BaseModel):
+    job_id: str | None = None
+    job_title: str | None = None
+
+
+class CoverLetterInput(BaseModel):
+    job_id: str | None = None
+    job_title: str | None = None
+
+
+class InterviewPrepInput(BaseModel):
+    job_id: str | None = None
+    job_title: str | None = None
+
+
+class MockInterviewStartInput(BaseModel):
+    job_id: str | None = None
+    job_title: str | None = None
+
+
+class MockInterviewAnswerInput(BaseModel):
+    interview_id: int
+    question_index: int
+    question_text: str
+    category: str = "Technical"
+    user_answer: str
+
+
+class CareerAssistantInput(BaseModel):
+    profile_id: int | None = None
+    job_id: str | None = None
+    message: str
+    history: list[dict] = []
 
 
 # ============================================================
@@ -186,6 +223,85 @@ def create_database():
             uploaded_at TEXT NOT NULL,
             extraction_json TEXT,
             extraction_method TEXT,
+            FOREIGN KEY(profile_id)
+                REFERENCES profiles(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS skill_gaps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            job_id TEXT NOT NULL,
+            result_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(profile_id)
+                REFERENCES profiles(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS customized_resumes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            job_id TEXT NOT NULL,
+            resume_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(profile_id)
+                REFERENCES profiles(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS cover_letters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            job_id TEXT NOT NULL,
+            letter_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(profile_id)
+                REFERENCES profiles(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS interview_preps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            job_id TEXT NOT NULL,
+            prep_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(profile_id)
+                REFERENCES profiles(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS mock_interviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            job_id TEXT NOT NULL,
+            job_title TEXT NOT NULL,
+            company TEXT NOT NULL,
+            status TEXT NOT NULL,
+            questions_json TEXT NOT NULL,
+            current_index INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(profile_id)
+                REFERENCES profiles(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS mock_interview_answers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            interview_id INTEGER NOT NULL,
+            question_index INTEGER NOT NULL,
+            question_text TEXT NOT NULL,
+            category TEXT NOT NULL,
+            user_answer TEXT NOT NULL,
+            evaluation_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(interview_id)
+                REFERENCES mock_interviews(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            job_id TEXT,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            context_used_json TEXT,
+            created_at TEXT NOT NULL,
             FOREIGN KEY(profile_id)
                 REFERENCES profiles(id)
         );
@@ -293,9 +409,7 @@ def health_check():
 # ============================================================
 
 @app.post("/profiles")
-def create_profile(
-    profile: ProfileInput
-):
+def create_profile(profile: ProfileInput):
 
     connection = get_connection()
 
@@ -320,47 +434,51 @@ def create_profile(
         timezone.utc
     ).isoformat()
 
-    cursor = connection.execute(
-        """
-        INSERT INTO profiles
-        (
-            full_name,
-            email,
-            phone,
-            location,
-            target_role,
-            linkedin_url,
-            created_at
+    try:
+
+        cursor = connection.execute(
+            """
+            INSERT INTO profiles
+            (
+                full_name,
+                email,
+                phone,
+                location,
+                target_role,
+                linkedin_url,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                profile.full_name,
+                str(profile.email),
+                profile.phone,
+                profile.location,
+                profile.target_role,
+                profile.linkedin_url,
+                now
+            )
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            profile.full_name,
-            str(profile.email),
-            profile.phone,
-            profile.location,
-            profile.target_role,
-            profile.linkedin_url,
-            now
-        )
-    )
 
-    connection.commit()
+        connection.commit()
 
-    saved_profile = connection.execute(
-        """
-        SELECT *
-        FROM profiles
-        WHERE id = ?
-        """,
-        (
-            cursor.lastrowid,
-        )
-    ).fetchone()
+        saved_profile = connection.execute(
+            """
+            SELECT *
+            FROM profiles
+            WHERE id = ?
+            """,
+            (
+                cursor.lastrowid,
+            )
+        ).fetchone()
 
-    connection.close()
+        return dict(saved_profile)
 
-    return dict(saved_profile)
+    finally:
+
+        connection.close()
 
 
 # ============================================================
@@ -509,6 +627,7 @@ def local_resume_extraction(text: str):
     for skill in known_skills:
 
         if skill.lower() in lower_text:
+
             skills.append(skill)
 
     # --------------------------------------------------------
@@ -519,13 +638,13 @@ def local_resume_extraction(text: str):
 
     education_patterns = [
         r"(B\.?E\.?.{0,120})",
-        r"(B\.?Tech.{0,120})",
+        r"(B\.?Tech\.?.{0,120})",
         r"(Bachelor.{0,120})",
-        r"(M\.?Tech.{0,120})",
+        r"(M\.?Tech\.?.{0,120})",
         r"(Master.{0,120})",
-        r"(B\.?Sc.{0,120})",
-        r"(M\.?Sc.{0,120})",
-        r"(Ph\.?D.{0,120})"
+        r"(B\.?Sc\.?.{0,120})",
+        r"(M\.?Sc\.?.{0,120})",
+        r"(Ph\.?D\.?.{0,120})"
     ]
 
     for pattern in education_patterns:
@@ -581,7 +700,7 @@ def local_resume_extraction(text: str):
     project_match = re.search(
         r"(projects?)(.*?)(certifications?|education|experience|skills|$)",
         text,
-        flags=re.IGNORECASE
+        flags=re.IGNORECASE | re.DOTALL
     )
 
     if project_match:
@@ -603,7 +722,7 @@ def local_resume_extraction(text: str):
     certification_match = re.search(
         r"(certifications?|courses?)(.*?)(projects?|education|experience|skills|$)",
         text,
-        flags=re.IGNORECASE
+        flags=re.IGNORECASE | re.DOTALL
     )
 
     if certification_match:
@@ -679,9 +798,10 @@ def clean_gemini_json(raw_text: str):
 
     raw_text = raw_text.strip()
 
-    # Remove ```json ... ``` if returned
+    # Remove markdown code fences
+
     raw_text = re.sub(
-        r"^```json\s*",
+        r"^```(?:json)?\s*",
         "",
         raw_text,
         flags=re.IGNORECASE
@@ -703,7 +823,6 @@ def clean_gemini_json(raw_text: str):
 def gemini_resume_extraction(text: str):
 
     client = get_gemini_client()
-
     model_name = get_gemini_model()
 
     prompt = f"""
@@ -774,14 +893,15 @@ def gemini_match_explanations(
     candidate: dict,
     results: list
 ):
+
     """
     Generate personalized natural-language explanations
     for job matches using Gemini.
 
-    IMPORTANT:
     Gemini does NOT calculate the match score.
 
-    The matching service already calculates:
+    The deterministic matching service calculates:
+
     - match_score
     - matched_skills
     - missing_skills
@@ -792,10 +912,10 @@ def gemini_match_explanations(
     """
 
     if not results:
+
         return {}
 
     client = get_gemini_client()
-
     model_name = get_gemini_model()
 
     # --------------------------------------------------------
@@ -814,10 +934,6 @@ def gemini_match_explanations(
 
     # --------------------------------------------------------
     # Job matching evidence
-    #
-    # Deliberately remove existing "reasoning" because
-    # that reasoning may have been generated by the
-    # deterministic matching service.
     # --------------------------------------------------------
 
     job_evidence = []
@@ -835,7 +951,6 @@ def gemini_match_explanations(
             }:
                 continue
 
-            # Keep useful evidence only
             if key in {
                 "job_id",
                 "job_title",
@@ -856,10 +971,9 @@ def gemini_match_explanations(
                 "qualification_score",
                 "retrieval_similarity"
             }:
+
                 evidence[key] = value
 
-        # Internal index guarantees that even if job_id
-        # is missing, we can still map the explanation.
         evidence["_result_index"] = index
 
         job_evidence.append(
@@ -870,22 +984,19 @@ def gemini_match_explanations(
 You are an AI career advisor.
 
 Your task is to explain why each recommended job
-is a good or moderate match for the candidate.
+matches the candidate based ONLY on the supplied evidence.
 
 IMPORTANT:
 
 1. Do NOT calculate or modify the match score.
 2. Do NOT invent candidate skills.
 3. Do NOT invent job requirements.
-4. Use ONLY the candidate information and matching
-   evidence supplied below.
+4. Use ONLY the candidate information and matching evidence supplied below.
 5. Mention strong skill alignment when appropriate.
-6. Mention relevant projects or education when the
-   supplied evidence supports it.
+6. Mention relevant projects or education when supported.
 7. Mention important missing skills when present.
 8. Be honest about weaknesses.
-9. Do not say the candidate is "perfect" unless the
-   evidence genuinely supports that.
+9. Do not say the candidate is "perfect" unless the evidence genuinely supports it.
 10. Each explanation should be personalized.
 11. Each explanation should be 2-4 sentences.
 12. Return ONLY valid JSON.
@@ -970,11 +1081,13 @@ MATCHING EVIDENCE:
 
         if reasoning:
 
-            key = (
-                str(job_id)
-                if job_id is not None
-                else str(result_index)
-            )
+            if job_id is not None:
+
+                key = str(job_id)
+
+            else:
+
+                key = str(result_index)
 
             explanations[key] = reasoning
 
@@ -1041,7 +1154,7 @@ async def upload_resume(
     # --------------------------------------------------------
 
     safe_filename = Path(
-        file.filename
+        file.filename or "resume"
     ).name
 
     timestamp = int(
@@ -1097,6 +1210,9 @@ async def upload_resume(
 
     if not resume_text.strip():
 
+        if saved_path.exists():
+            saved_path.unlink()
+
         raise HTTPException(
             status_code=400,
             detail="Could not extract text from the uploaded resume."
@@ -1114,8 +1230,6 @@ async def upload_resume(
             resume_text
         )
 
-        # IMPORTANT:
-        # Frontend checks for "gemini_llm"
         extraction_method = "gemini_llm"
 
         print(
@@ -1152,41 +1266,45 @@ async def upload_resume(
 
     connection = get_connection()
 
-    cursor = connection.execute(
-        """
-        INSERT INTO resumes
-        (
-            profile_id,
-            filename,
-            file_path,
-            file_type,
-            size_bytes,
-            uploaded_at,
-            extraction_json,
-            extraction_method
+    try:
+
+        cursor = connection.execute(
+            """
+            INSERT INTO resumes
+            (
+                profile_id,
+                filename,
+                file_path,
+                file_type,
+                size_bytes,
+                uploaded_at,
+                extraction_json,
+                extraction_method
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                profile_id,
+                safe_filename,
+                str(saved_path),
+                extension,
+                saved_path.stat().st_size,
+                uploaded_at,
+                json.dumps(
+                    extracted,
+                    ensure_ascii=False
+                ),
+                extraction_method
+            )
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            profile_id,
-            safe_filename,
-            str(saved_path),
-            extension,
-            saved_path.stat().st_size,
-            uploaded_at,
-            json.dumps(
-                extracted,
-                ensure_ascii=False
-            ),
-            extraction_method
-        )
-    )
 
-    connection.commit()
+        connection.commit()
 
-    resume_id = cursor.lastrowid
+        resume_id = cursor.lastrowid
 
-    connection.close()
+    finally:
+
+        connection.close()
 
     return {
         "status": "success",
@@ -1203,9 +1321,7 @@ async def upload_resume(
 # ============================================================
 
 @app.get("/profiles/{profile_id}/resumes/latest")
-def get_latest_resume(
-    profile_id: int
-):
+def get_latest_resume(profile_id: int):
 
     connection = get_connection()
 
@@ -1256,9 +1372,7 @@ def get_latest_resume(
 # ============================================================
 
 @app.post("/jobs/search")
-def search_jobs(
-    request: JobSearchInput
-):
+def search_jobs(request: JobSearchInput):
 
     if job_retriever is None:
 
@@ -1267,10 +1381,26 @@ def search_jobs(
             detail="RAG job retriever is unavailable."
         )
 
-    results = job_retriever.search(
-        request.query,
-        top_k=request.top_k
-    )
+    if request.top_k < 1:
+
+        raise HTTPException(
+            status_code=400,
+            detail="top_k must be at least 1."
+        )
+
+    try:
+
+        results = job_retriever.search(
+            request.query,
+            top_k=request.top_k
+        )
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Job search failed: {error}"
+        )
 
     return {
         "query": request.query,
@@ -1293,6 +1423,13 @@ def get_job_matches(
         raise HTTPException(
             status_code=503,
             detail="Matching service is unavailable."
+        )
+
+    if request.top_k < 1:
+
+        raise HTTPException(
+            status_code=400,
+            detail="top_k must be at least 1."
         )
 
     # --------------------------------------------------------
@@ -1369,14 +1506,6 @@ def get_job_matches(
 
     # --------------------------------------------------------
     # Deterministic matching
-    #
-    # This part remains unchanged.
-    # The matching service calculates:
-    # - match score
-    # - matched skills
-    # - missing skills
-    # - qualification scores
-    # - retrieval similarity
     # --------------------------------------------------------
 
     try:
@@ -1421,15 +1550,12 @@ def get_job_matches(
             f"Reason: {error}"
         )
 
-        # We DO NOT generate a hard-coded explanation.
-        # Instead, clearly indicate that the AI explanation
-        # could not be generated.
         explanations = {}
 
         explanation_source = "unavailable"
 
     # --------------------------------------------------------
-    # Attach Gemini explanations
+    # Attach explanations
     # --------------------------------------------------------
 
     final_results = []
@@ -1445,13 +1571,15 @@ def get_job_matches(
         explanation = None
 
         # First try exact job_id
+
         if job_id is not None:
 
             explanation = explanations.get(
                 str(job_id)
             )
 
-        # If job_id was not available, try result index
+        # Fallback to result index
+
         if not explanation:
 
             explanation = explanations.get(
@@ -1487,15 +1615,653 @@ def get_job_matches(
 
 
 # ============================================================
+# HELPER: RESOLVE CANDIDATE & JOB DATA
+# ============================================================
+
+def resolve_candidate_and_job(
+    profile_id: int,
+    job_id: str | None = None,
+    job_title: str | None = None
+):
+    """
+    Loads verified candidate profile and resolves target job from dataset or matches.
+    """
+    connection = get_connection()
+
+    profile_row = connection.execute(
+        """
+        SELECT *
+        FROM profiles
+        WHERE id = ?
+        """,
+        (profile_id,)
+    ).fetchone()
+
+    if not profile_row:
+        connection.close()
+        raise HTTPException(
+            status_code=404,
+            detail="Profile not found."
+        )
+
+    resume_row = connection.execute(
+        """
+        SELECT *
+        FROM resumes
+        WHERE profile_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (profile_id,)
+    ).fetchone()
+
+    connection.close()
+
+    if not resume_row:
+        raise HTTPException(
+            status_code=404,
+            detail="Please upload a resume before using Milestone 3 AI features."
+        )
+
+    candidate = dict(profile_row)
+
+    if resume_row["extraction_json"]:
+        try:
+            extraction = json.loads(resume_row["extraction_json"])
+            candidate.update(extraction)
+        except Exception:
+            pass
+
+    # Resolve job
+    all_jobs = load_all_jobs()
+    selected_job = None
+
+    if job_id:
+        for j in all_jobs:
+            if str(j.get("job_id")) == str(job_id):
+                selected_job = j
+                break
+    elif job_title:
+        for j in all_jobs:
+            if (
+                j.get("job_title")
+                and j.get("job_title").strip().lower() == job_title.strip().lower()
+            ):
+                selected_job = j
+                break
+
+    # Fallback to first job if none specified
+    if selected_job is None and all_jobs:
+        selected_job = all_jobs[0]
+
+    if selected_job is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Target job could not be resolved from dataset."
+        )
+
+    return candidate, selected_job
+
+
+# ============================================================
+# M3.1 — SKILL GAP ANALYSIS
+# ============================================================
+
+@app.post("/profiles/{profile_id}/skill-gap")
+def analyze_skill_gap(
+    profile_id: int,
+    request: SkillGapInput
+):
+    candidate, job = resolve_candidate_and_job(
+        profile_id=profile_id,
+        job_id=request.job_id,
+        job_title=request.job_title
+    )
+
+    result = skill_gap_agent.analyze_skill_gap(
+        candidate=candidate,
+        job=job
+    )
+
+    # Persist analysis
+    now = datetime.now(timezone.utc).isoformat()
+    connection = get_connection()
+    try:
+        connection.execute(
+            """
+            INSERT INTO skill_gaps (profile_id, job_id, result_json, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                profile_id,
+                str(job.get("job_id", "")),
+                json.dumps(result, ensure_ascii=False),
+                now
+            )
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    result["profile_id"] = profile_id
+    result["job_id"] = job.get("job_id")
+    return result
+
+
+# ============================================================
+# M3.2 — RESUME CUSTOMIZATION
+# ============================================================
+
+@app.post("/profiles/{profile_id}/customize-resume")
+def customize_resume(
+    profile_id: int,
+    request: ResumeCustomizationInput
+):
+    candidate, job = resolve_candidate_and_job(
+        profile_id=profile_id,
+        job_id=request.job_id,
+        job_title=request.job_title
+    )
+
+    result = application_agent.customize_resume(
+        candidate=candidate,
+        job=job
+    )
+
+    now = datetime.now(timezone.utc).isoformat()
+    connection = get_connection()
+    try:
+        connection.execute(
+            """
+            INSERT INTO customized_resumes (profile_id, job_id, resume_json, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                profile_id,
+                str(job.get("job_id", "")),
+                json.dumps(result, ensure_ascii=False),
+                now
+            )
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    result["profile_id"] = profile_id
+    result["job_id"] = job.get("job_id")
+    return result
+
+
+# ============================================================
+# M3.2 — COVER LETTER GENERATION
+# ============================================================
+
+@app.post("/profiles/{profile_id}/cover-letter")
+def generate_cover_letter(
+    profile_id: int,
+    request: CoverLetterInput
+):
+    candidate, job = resolve_candidate_and_job(
+        profile_id=profile_id,
+        job_id=request.job_id,
+        job_title=request.job_title
+    )
+
+    result = application_agent.generate_cover_letter(
+        candidate=candidate,
+        job=job
+    )
+
+    now = datetime.now(timezone.utc).isoformat()
+    connection = get_connection()
+    try:
+        connection.execute(
+            """
+            INSERT INTO cover_letters (profile_id, job_id, letter_json, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                profile_id,
+                str(job.get("job_id", "")),
+                json.dumps(result, ensure_ascii=False),
+                now
+            )
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    result["profile_id"] = profile_id
+    result["job_id"] = job.get("job_id")
+    return result
+
+
+# ============================================================
+# M3.3 — INTERVIEW PREPARATION
+# ============================================================
+
+@app.post("/profiles/{profile_id}/interview-prep")
+def generate_interview_prep(
+    profile_id: int,
+    request: InterviewPrepInput
+):
+    candidate, job = resolve_candidate_and_job(
+        profile_id=profile_id,
+        job_id=request.job_id,
+        job_title=request.job_title
+    )
+
+    # Check if recent skill gap exists for additional context
+    skill_gap = None
+    connection = get_connection()
+    try:
+        gap_row = connection.execute(
+            """
+            SELECT result_json
+            FROM skill_gaps
+            WHERE profile_id = ? AND job_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (profile_id, str(job.get("job_id", "")))
+        ).fetchone()
+
+        if gap_row:
+            try:
+                skill_gap = json.loads(gap_row["result_json"])
+            except Exception:
+                pass
+    finally:
+        connection.close()
+
+    result = interview_agent.generate_interview_prep(
+        candidate=candidate,
+        job=job,
+        skill_gap=skill_gap
+    )
+
+    now = datetime.now(timezone.utc).isoformat()
+    connection = get_connection()
+    try:
+        connection.execute(
+            """
+            INSERT INTO interview_preps (profile_id, job_id, prep_json, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                profile_id,
+                str(job.get("job_id", "")),
+                json.dumps(result, ensure_ascii=False),
+                now
+            )
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    result["profile_id"] = profile_id
+    result["job_id"] = job.get("job_id")
+    return result
+
+
+# ============================================================
+# M3.3 — MOCK INTERVIEW SIMULATOR
+# ============================================================
+
+@app.post("/profiles/{profile_id}/mock-interview/start")
+def start_mock_interview(
+    profile_id: int,
+    request: MockInterviewStartInput
+):
+    candidate, job = resolve_candidate_and_job(
+        profile_id=profile_id,
+        job_id=request.job_id,
+        job_title=request.job_title
+    )
+
+    # Generate complete question bank
+    prep_data = interview_agent.generate_interview_prep(
+        candidate=candidate,
+        job=job
+    )
+
+    # Select 5 curated sequential questions across categories
+    curated_questions = []
+    
+    if prep_data.get("technical_questions"):
+        curated_questions.append(prep_data["technical_questions"][0])
+    if prep_data.get("project_questions"):
+        curated_questions.append(prep_data["project_questions"][0])
+    if len(prep_data.get("technical_questions", [])) > 1:
+        curated_questions.append(prep_data["technical_questions"][1])
+    if prep_data.get("resume_questions"):
+        curated_questions.append(prep_data["resume_questions"][0])
+    if prep_data.get("hr_questions"):
+        curated_questions.append(prep_data["hr_questions"][0])
+
+    if not curated_questions:
+        curated_questions = [
+            {
+                "id": "q1",
+                "category": "Technical",
+                "question": f"Explain your core experience with {', '.join(job.get('required_skills', ['Python'])[:3])}.",
+                "preparation_guide": "Walk through fundamental principles and practical applications.",
+                "suggested_topics": ["Architecture", "Key libraries", "Testing"],
+                "sample_answer_framework": "Definition -> Example -> Impact."
+            }
+        ]
+
+    now = datetime.now(timezone.utc).isoformat()
+    connection = get_connection()
+    try:
+        cursor = connection.execute(
+            """
+            INSERT INTO mock_interviews
+            (profile_id, job_id, job_title, company, status, questions_json, current_index, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                profile_id,
+                str(job.get("job_id", "")),
+                str(job.get("job_title", "Target Role")),
+                str(job.get("company", "Target Company")),
+                "in_progress",
+                json.dumps(curated_questions, ensure_ascii=False),
+                0,
+                now
+            )
+        )
+        connection.commit()
+        interview_id = cursor.lastrowid
+    finally:
+        connection.close()
+
+    return {
+        "interview_id": interview_id,
+        "profile_id": profile_id,
+        "job_id": job.get("job_id"),
+        "job_title": job.get("job_title"),
+        "company": job.get("company"),
+        "total_questions": len(curated_questions),
+        "current_question_index": 0,
+        "current_question": curated_questions[0],
+        "status": "in_progress"
+    }
+
+
+@app.post("/profiles/{profile_id}/mock-interview/answer")
+def submit_mock_interview_answer(
+    profile_id: int,
+    request: MockInterviewAnswerInput
+):
+    connection = get_connection()
+    session = connection.execute(
+        """
+        SELECT *
+        FROM mock_interviews
+        WHERE id = ? AND profile_id = ?
+        """,
+        (request.interview_id, profile_id)
+    ).fetchone()
+
+    if not session:
+        connection.close()
+        raise HTTPException(
+            status_code=404,
+            detail="Mock interview session not found."
+        )
+
+    questions = json.loads(session["questions_json"])
+    candidate_row = connection.execute(
+        "SELECT * FROM profiles WHERE id = ?", (profile_id,)
+    ).fetchone()
+    resume_row = connection.execute(
+        "SELECT * FROM resumes WHERE profile_id = ? ORDER BY id DESC LIMIT 1", (profile_id,)
+    ).fetchone()
+    
+    candidate = dict(candidate_row)
+    if resume_row and resume_row["extraction_json"]:
+        try:
+            candidate.update(json.loads(resume_row["extraction_json"]))
+        except Exception:
+            pass
+
+    job = {
+        "job_id": session["job_id"],
+        "job_title": session["job_title"],
+        "company": session["company"]
+    }
+
+    # Evaluate answer
+    evaluation = interview_agent.evaluate_mock_answer(
+        candidate=candidate,
+        job=job,
+        question=request.question_text,
+        answer=request.user_answer,
+        category=request.category
+    )
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Record answer
+    connection.execute(
+        """
+        INSERT INTO mock_interview_answers
+        (interview_id, question_index, question_text, category, user_answer, evaluation_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            request.interview_id,
+            request.question_index,
+            request.question_text,
+            request.category,
+            request.user_answer,
+            json.dumps(evaluation, ensure_ascii=False),
+            now
+        )
+    )
+
+    next_index = request.question_index + 1
+    is_completed = next_index >= len(questions)
+    new_status = "completed" if is_completed else "in_progress"
+
+    connection.execute(
+        """
+        UPDATE mock_interviews
+        SET current_index = ?, status = ?
+        WHERE id = ?
+        """,
+        (next_index, new_status, request.interview_id)
+    )
+    connection.commit()
+    connection.close()
+
+    next_question = questions[next_index] if not is_completed else None
+
+    return {
+        "interview_id": request.interview_id,
+        "question_index": request.question_index,
+        "evaluation": evaluation,
+        "is_completed": is_completed,
+        "next_question_index": next_index if not is_completed else None,
+        "next_question": next_question,
+        "total_questions": len(questions)
+    }
+
+
+@app.get("/profiles/{profile_id}/mock-interview/{interview_id}")
+def get_mock_interview_details(
+    profile_id: int,
+    interview_id: int
+):
+    connection = get_connection()
+    session = connection.execute(
+        """
+        SELECT *
+        FROM mock_interviews
+        WHERE id = ? AND profile_id = ?
+        """,
+        (interview_id, profile_id)
+    ).fetchone()
+
+    if not session:
+        connection.close()
+        raise HTTPException(
+            status_code=404,
+            detail="Mock interview session not found."
+        )
+
+    answers = connection.execute(
+        """
+        SELECT *
+        FROM mock_interview_answers
+        WHERE interview_id = ?
+        ORDER BY question_index ASC
+        """,
+        (interview_id,)
+    ).fetchall()
+
+    connection.close()
+
+    parsed_answers = []
+    for a in answers:
+        item = dict(a)
+        if item.get("evaluation_json"):
+            try:
+                item["evaluation"] = json.loads(item["evaluation_json"])
+            except Exception:
+                item["evaluation"] = {}
+        parsed_answers.append(item)
+
+    session_dict = dict(session)
+    session_dict["questions"] = json.loads(session_dict.get("questions_json", "[]"))
+    session_dict["answers"] = parsed_answers
+    return session_dict
+
+
+# ============================================================
+# M3.4 — CONVERSATIONAL CAREER ASSISTANT
+# ============================================================
+
+@app.post("/career-assistant/chat")
+def chat_career_assistant(request: CareerAssistantInput):
+    profile = {}
+    job = {}
+    skill_gap = {}
+
+    connection = get_connection()
+
+    if request.profile_id:
+        profile_row = connection.execute(
+            "SELECT * FROM profiles WHERE id = ?", (request.profile_id,)
+        ).fetchone()
+
+        if profile_row:
+            profile = dict(profile_row)
+            resume_row = connection.execute(
+                "SELECT * FROM resumes WHERE profile_id = ? ORDER BY id DESC LIMIT 1",
+                (request.profile_id,)
+            ).fetchone()
+
+            if resume_row and resume_row["extraction_json"]:
+                try:
+                    profile.update(json.loads(resume_row["extraction_json"]))
+                except Exception:
+                    pass
+
+            if request.job_id:
+                gap_row = connection.execute(
+                    "SELECT result_json FROM skill_gaps WHERE profile_id = ? AND job_id = ? ORDER BY id DESC LIMIT 1",
+                    (request.profile_id, str(request.job_id))
+                ).fetchone()
+                if gap_row:
+                    try:
+                        skill_gap = json.loads(gap_row["result_json"])
+                    except Exception:
+                        pass
+
+    if request.job_id:
+        all_jobs = load_all_jobs()
+        for j in all_jobs:
+            if str(j.get("job_id")) == str(request.job_id):
+                job = j
+                break
+
+    # Run conversational assistant turn
+    response = career_assistant.chat(
+        message=request.message,
+        profile=profile,
+        job=job,
+        skill_gap=skill_gap,
+        history=request.history
+    )
+
+    # Persist chat message if profile_id is provided
+    if request.profile_id:
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            # User message
+            connection.execute(
+                """
+                INSERT INTO chat_messages (profile_id, job_id, role, content, context_used_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (request.profile_id, request.job_id, "user", request.message, None, now)
+            )
+            # Assistant response
+            connection.execute(
+                """
+                INSERT INTO chat_messages (profile_id, job_id, role, content, context_used_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    request.profile_id,
+                    request.job_id,
+                    "assistant",
+                    response.get("message", ""),
+                    json.dumps(response.get("context_used", {})),
+                    now
+                )
+            )
+            connection.commit()
+        except Exception:
+            pass
+
+    connection.close()
+    return response
+
+
+@app.get("/career-assistant/history/{profile_id}")
+def get_chat_history(profile_id: int):
+    connection = get_connection()
+    messages = connection.execute(
+        """
+        SELECT role, content, created_at, job_id
+        FROM chat_messages
+        WHERE profile_id = ?
+        ORDER BY id ASC
+        LIMIT 50
+        """,
+        (profile_id,)
+    ).fetchall()
+    connection.close()
+
+    return {
+        "profile_id": profile_id,
+        "messages": [dict(m) for m in messages]
+    }
+
+
+# ============================================================
 # ROOT
 # ============================================================
 
 @app.get("/")
 def root():
-
     return {
         "name": "AI Career Companion Agent",
-        "version": "0.4.0",
+        "version": "0.6.0",
         "status": "running",
-        "docs": "/docs"
+        "docs": "/docs",
+        "milestones": ["M1", "M2", "M3"]
     }
