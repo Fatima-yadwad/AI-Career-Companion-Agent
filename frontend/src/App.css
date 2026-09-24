@@ -3724,3 +3724,410 @@ body,
     font-size: 28px;
   }
 }
+
+/* =========================================================
+   DARK READABILITY OVERRIDES
+========================================================= */
+/*
+
+:root {
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-success: #34d399;
+  --text-warning: #fbbf24;
+  --text-error: #f87171;
+  --dark-page: #080b12;
+  --dark-surface: #0f172a;
+  --dark-surface-raised: #111827;
+}
+
+html,
+body,
+.app-shell {
+  background: var(--dark-page);
+  color: var(--text-secondary);
+}
+
+.topbar {
+  background: rgba(8, 11, 18, 0.88);
+  border-bottom-color: rgba(255, 255, 255, 0.055);
+}
+
+.hero-card,
+.profile-side-card,
+.upload-card,
+.next-step-card,
+.roadmap-card,
+.empty-large,
+.analysis-loading,
+.m3-next-steps-banner,
+.job-reasoning-box {
+  background: rgba(13, 17, 26, 0.86);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+body,
+button,
+input,
+select,
+textarea {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+h1,
+h2,
+h3,
+h4,
+.page-intro h1,
+.skillgap-header h1,
+.job-card-title h3,
+.job-title-line h4,
+.panel-header h3,
+.gap-panel h3,
+.roadmap-card h2,
+.roadmap-item h4,
+.launchpad-card h4,
+.m3-next-steps-banner h3 {
+  color: var(--text-primary);
+}
+
+p,
+.page-intro p,
+.skillgap-header p,
+.hero-card p,
+.welcome-row p,
+.launchpad-card p,
+.job-card-title strong,
+.job-reasoning-box p,
+.gap-detail-card p,
+.roadmap-card > div:first-child p,
+.step-body p,
+.m3-next-steps-banner p,
+.profile-side-card > p,
+.upload-card > p,
+.empty-large p,
+.analysis-loading p {
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.brand-subtitle,
+.nav-title,
+.breadcrumb,
+.top-status,
+.job-id,
+.job-meta,
+.job-meta-row,
+.step-meta,
+.card-meta,
+.muted,
+.profile-mini-text span,
+.stat-detail,
+.input-group input::placeholder,
+.search-box input::placeholder {
+  color: var(--text-muted);
+}
+
+.sidebar {
+  background: linear-gradient(180deg, #0c1019 0%, #080b12 100%);
+  border-right-color: rgba(255, 255, 255, 0.07);
+}
+
+.nav-item {
+  color: var(--text-secondary);
+}
+
+.nav-item:hover,
+.nav-item.active {
+  color: var(--text-primary);
+}
+
+.nav-icon {
+  color: var(--text-muted);
+}
+
+.nav-item.active .nav-icon {
+  color: #a991ff;
+}
+
+.breadcrumb strong,
+.profile-mini-text strong,
+.stat-label,
+.stat-value,
+.insight-main h4,
+.score-circle strong,
+.big-score-number,
+.gap-detail-card strong,
+.roadmap-step strong,
+.uploaded-file strong,
+.skill-preview span,
+.large-skill-cloud span {
+  color: var(--text-primary);
+}
+
+.secondary-button,
+.outline-button,
+.refresh-button,
+.m3-action-btn,
+.mini-action-btn,
+.studio-tab,
+.category-pill {
+  color: var(--text-secondary);
+}
+
+.secondary-button:hover,
+.outline-button:hover,
+.refresh-button:hover,
+.m3-action-btn:hover,
+.mini-action-btn:hover,
+.studio-tab:hover,
+.category-pill:hover {
+  color: var(--text-primary);
+}
+
+.secondary-button,
+.outline-button,
+.refresh-button,
+.m3-action-btn,
+.mini-action-btn,
+.studio-tab,
+.category-pill {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.job-selector-bar {
+  color: var(--text-secondary);
+}
+
+.job-selector-bar select,
+.job-selector-bar option {
+  color: var(--text-primary);
+  background: #111827;
+}
+
+.summary-banner,
+.assistant-bubble,
+.gap-detail-card,
+.roadmap-item,
+.launchpad-card,
+.panel,
+.job-card,
+.stat-card,
+.editor-card,
+.cover-letter-container,
+.question-card,
+.mock-session-header,
+.active-question-card,
+.mock-feedback-card,
+.chat-container {
+  background: rgba(15, 23, 42, 0.78);
+}
+
+.skill-preview span,
+.large-skill-cloud span,
+.skill-badge {
+  background: rgba(255, 255, 255, 0.025);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.summary-banner,
+.summary-banner p,
+.gap-detail-card p.why,
+.gap-detail-card p.note,
+.gap-detail-card p.evidence,
+.step-body p,
+.assistant-bubble,
+.suggested-structure-box {
+  color: var(--text-secondary);
+}
+
+.gap-detail-card p.action,
+.card-link,
+.text-button,
+.back-button,
+.target-skill-tag {
+  color: #67e8f9;
+}
+
+.gap-detail-card p.evidence em,
+.gap-detail-card p.why strong,
+.gap-detail-card p.action strong {
+  color: var(--text-primary);
+}
+
+.gap-panel-icon.success,
+.badge.success,
+.skill-heading.matched,
+.matched-tag,
+.file-check {
+  color: var(--text-success);
+}
+
+.gap-panel-icon.warning,
+.gap-panel-icon.danger,
+.badge.role-specific,
+.skill-heading.missing,
+.missing-tag {
+  color: var(--text-warning);
+}
+
+.gap-panel-icon.danger,
+.badge.danger {
+  color: var(--text-error);
+}
+
+.badge.danger,
+.toast.error {
+  color: var(--text-error);
+}
+
+.roadmap-step small,
+.roadmap-step .step-meta,
+.step-meta {
+  color: var(--text-muted);
+}
+
+.input-group span,
+.input-group label,
+.reasoning-label,
+.skill-heading,
+.jobs-heading {
+  color: var(--text-secondary);
+}
+
+.input-group input,
+.search-box,
+.studio-input,
+.studio-textarea,
+.cover-letter-editor,
+.mock-answer-textarea,
+.chat-input-bar input {
+  color: var(--text-primary);
+  background: var(--dark-surface-raised);
+}
+
+.chat-empty,
+.chat-bubble,
+.bubble-body p,
+.rubric-feedback,
+.guide-box,
+.framework-box {
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+button:disabled {
+  opacity: 0.6;
+}
+*/
+
+/* Readable text only: preserve the existing light surfaces and layout. */
+body,
+.app-shell {
+  color: #1e293b;
+}
+
+.brand-name,
+.profile-mini-text strong,
+.breadcrumb strong,
+.page-intro h1,
+.skillgap-header h1,
+.welcome-row h2,
+.panel-header h3,
+.profile-side-card h3,
+.upload-card h3,
+.job-card-title h3,
+.job-title-line h4,
+.roadmap-card h2,
+.roadmap-item h4,
+.launchpad-card h4,
+.m3-next-steps-banner h3,
+.gap-panel h3,
+.summary-banner strong,
+.gap-detail-card strong,
+.step-body h4 {
+  color: #1e293b;
+}
+
+.page-intro p,
+.skillgap-header p,
+.hero-card p,
+.welcome-row p,
+.launchpad-card p,
+.job-card-title strong,
+.job-reasoning-box p,
+.gap-detail-card p,
+.roadmap-card > div:first-child p,
+.step-body p,
+.m3-next-steps-banner p,
+.profile-side-card > p,
+.upload-card > p,
+.empty-large p,
+.analysis-loading p,
+.insight-main p,
+.mini-job-main p {
+  color: #334155;
+}
+
+.sidebar-status,
+.nav-item,
+.top-status,
+.breadcrumb,
+.profile-mini-text span,
+.input-group span,
+.job-id,
+.job-meta,
+.job-meta-row,
+.step-meta,
+.stat-detail,
+.muted,
+.jobs-heading,
+.job-selector-bar,
+.roadmap-step small,
+.gap-detail-card p.evidence,
+.gap-detail-card p.note,
+.search-box > span,
+.score-circle span,
+.big-score span {
+  color: #475569;
+}
+
+.nav-item.active,
+.nav-item:hover,
+.nav-item.active .nav-icon,
+.card-link,
+.text-button,
+.back-button,
+.gap-detail-card p.action,
+.target-skill-tag {
+  color: #334155;
+}
+
+.job-selector-bar select,
+.job-selector-bar option {
+  color: #1e293b;
+}
+
+.summary-banner p,
+.gap-detail-card p.why,
+.assistant-bubble,
+.suggested-structure-box,
+.chat-empty,
+.chat-bubble,
+.bubble-body p,
+.rubric-feedback,
+.guide-box,
+.framework-box {
+  color: #334155;
+}
+
+.gap-detail-card p.evidence em,
+.gap-detail-card p.why strong,
+.gap-detail-card p.action strong,
+.reasoning-label,
+.input-group label,
+.skill-heading {
+  color: #475569;
+}
