@@ -1,11 +1,15 @@
 html {
   min-width: 320px;
   background: #f5f7fb;
+  color: #172033;
 }
 
 body {
   margin: 0;
   min-width: 320px;
+  background: #f5f7fb;
+  color: #172033;
+  font-family: "DM Sans", sans-serif;
 }
 
 #root {

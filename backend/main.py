@@ -5,10 +5,14 @@ import shutil
 import sqlite3
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+import bcrypt
+import jwt
+from typing import Any
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 
@@ -118,6 +122,8 @@ app.add_middleware(
 
 job_retriever = None
 matching_service = None
+JOB_CACHE = None
+JOB_CACHE_BY_ID = {}
 
 
 # ============================================================
@@ -175,9 +181,59 @@ class MockInterviewAnswerInput(BaseModel):
     user_answer: str
 
 
+# ============================================================
+# M4.1 — APPLICATION TRACKING & MANAGEMENT MODELS
+# ============================================================
+
+VALID_APPLICATION_STATUSES = [
+    "Saved",
+    "Planning to apply",
+    "Applied",
+    "Application under review",
+    "Shortlisted",
+    "Interview scheduled",
+    "Interview completed",
+    "Offer received",
+    "Rejected",
+    "Withdrawn",
+]
+
+
+class ApplicationCreateInput(BaseModel):
+    job_id: str | None = None
+    company_name: str
+    job_title: str
+    job_description: str | None = None
+    application_date: str | None = None
+    deadline: str | None = None
+    status: str = "Saved"
+    interview_date: str | None = None
+    interview_status: str | None = None
+    notes: str | None = None
+    follow_up_date: str | None = None
+    customized_resume: Any | None = None
+    cover_letter: Any | None = None
+
+
+class ApplicationUpdateInput(BaseModel):
+    company_name: str | None = None
+    job_title: str | None = None
+    job_description: str | None = None
+    application_date: str | None = None
+    deadline: str | None = None
+    status: str | None = None
+    interview_date: str | None = None
+    interview_status: str | None = None
+    notes: str | None = None
+    follow_up_date: str | None = None
+    customized_resume: Any | None = None
+    cover_letter: Any | None = None
+
+
 class CareerAssistantInput(BaseModel):
     profile_id: int | None = None
     job_id: str | None = None
+    conversation_id: str | None = None
     message: str
     history: list[dict] = []
 
@@ -202,15 +258,29 @@ def create_database():
 
     connection.executescript(
         """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            full_name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1
+        );
+
         CREATE TABLE IF NOT EXISTS profiles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
             full_name TEXT NOT NULL,
             email TEXT UNIQUE NOT NULL,
             phone TEXT,
             location TEXT,
             target_role TEXT,
             linkedin_url TEXT,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            updated_at TEXT,
+            FOREIGN KEY(user_id)
+                REFERENCES users(id)
         );
 
         CREATE TABLE IF NOT EXISTS resumes (
@@ -298,6 +368,7 @@ def create_database():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             profile_id INTEGER NOT NULL,
             job_id TEXT,
+            conversation_id TEXT,
             role TEXT NOT NULL,
             content TEXT NOT NULL,
             context_used_json TEXT,
@@ -305,11 +376,489 @@ def create_database():
             FOREIGN KEY(profile_id)
                 REFERENCES profiles(id)
         );
+
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token_jti TEXT NOT NULL,
+            issued_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            revoked_at TEXT,
+            FOREIGN KEY(user_id)
+                REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS applications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            job_id TEXT,
+            company_name TEXT NOT NULL,
+            job_title TEXT NOT NULL,
+            job_description TEXT,
+            application_date TEXT NOT NULL,
+            deadline TEXT,
+            status TEXT NOT NULL DEFAULT 'Saved',
+            interview_date TEXT,
+            interview_status TEXT,
+            notes TEXT,
+            follow_up_date TEXT,
+            customized_resume TEXT,
+            cover_letter TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(profile_id)
+                REFERENCES profiles(id)
+        );
         """
     )
 
+    profile_columns = connection.execute("PRAGMA table_info(profiles)").fetchall()
+    if not any(column[1] == "user_id" for column in profile_columns):
+        connection.execute("ALTER TABLE profiles ADD COLUMN user_id INTEGER")
+    if not any(column[1] == "updated_at" for column in profile_columns):
+        connection.execute("ALTER TABLE profiles ADD COLUMN updated_at TEXT")
+
+    users_columns = connection.execute("PRAGMA table_info(users)").fetchall()
+    if not any(column[1] == "full_name" for column in users_columns):
+        connection.execute("ALTER TABLE users ADD COLUMN full_name TEXT NOT NULL DEFAULT ''")
+    if not any(column[1] == "updated_at" for column in users_columns):
+        connection.execute("ALTER TABLE users ADD COLUMN updated_at TEXT")
+    if not any(column[1] == "is_active" for column in users_columns):
+        connection.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
+
+    columns = connection.execute("PRAGMA table_info(chat_messages)").fetchall()
+    has_conversation_id = any(column[1] == "conversation_id" for column in columns)
+    if not has_conversation_id:
+        connection.execute("ALTER TABLE chat_messages ADD COLUMN conversation_id TEXT")
+
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chat_messages_profile_conversation ON chat_messages(profile_id, conversation_id, created_at)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles(user_id)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_applications_profile ON applications(profile_id)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(profile_id, status)"
+    )
+
+    app_columns = connection.execute("PRAGMA table_info(applications)").fetchall()
+    app_col_names = [column[1] for column in app_columns]
+    for col_name, col_type in [
+        ("job_id", "TEXT"),
+        ("job_description", "TEXT"),
+        ("deadline", "TEXT"),
+        ("interview_date", "TEXT"),
+        ("interview_status", "TEXT"),
+        ("notes", "TEXT"),
+        ("follow_up_date", "TEXT"),
+        ("customized_resume", "TEXT"),
+        ("cover_letter", "TEXT"),
+    ]:
+        if app_col_names and col_name not in app_col_names:
+            connection.execute(f"ALTER TABLE applications ADD COLUMN {col_name} {col_type}")
+
+    connection.execute("UPDATE profiles SET user_id = NULL WHERE user_id = 0")
+
+    for row in connection.execute("SELECT id, email, full_name FROM profiles WHERE user_id IS NULL AND email IS NOT NULL").fetchall():
+        match_user = connection.execute(
+            "SELECT id FROM users WHERE email = ? LIMIT 1",
+            (row["email"],)
+        ).fetchone()
+        if match_user:
+            connection.execute(
+                "UPDATE profiles SET user_id = ?, full_name = ?, updated_at = ? WHERE id = ?",
+                (match_user["id"], row["full_name"], datetime.now(timezone.utc).isoformat(), row["id"])
+            )
+
     connection.commit()
     connection.close()
+
+
+# ============================================================
+# AUTH HELPERS
+# ============================================================
+
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "career-companion-dev-secret-change-me")
+JWT_ALGORITHM = "HS256"
+JWT_TTL_SECONDS = 60 * 60 * 24
+
+
+class AuthRegisterInput(BaseModel):
+    full_name: str
+    email: EmailStr
+    password: str
+    confirm_password: str
+
+
+class AuthLoginInput(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class AuthProfileInput(BaseModel):
+    full_name: str | None = None
+    email: EmailStr | None = None
+    phone: str | None = None
+    location: str | None = None
+    target_role: str | None = None
+    linkedin_url: str | None = None
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except Exception:
+        return False
+
+
+def create_access_token(user_id: int) -> str:
+    issued_at = int(time.time())
+    payload = {
+        "sub": str(user_id),
+        "iat": issued_at,
+        "exp": issued_at + JWT_TTL_SECONDS,
+        "jti": uuid.uuid4().hex,
+    }
+    token = jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    connection = get_connection()
+    connection.execute(
+        """
+        INSERT INTO auth_sessions (user_id, token_jti, issued_at, expires_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            user_id,
+            payload["jti"],
+            datetime.fromtimestamp(issued_at, tz=timezone.utc).isoformat(),
+            datetime.fromtimestamp(payload["exp"], tz=timezone.utc).isoformat(),
+        )
+    )
+    connection.commit()
+    connection.close()
+    return token
+
+
+def get_optional_current_user(request: Request):
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header:
+        return None
+
+    parts = auth_header.split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    token = parts[1].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication failed or token expired.")
+
+    user_id = int(payload.get("sub", "0"))
+    jti = payload.get("jti")
+
+    connection = get_connection()
+    user = connection.execute(
+        "SELECT * FROM users WHERE id = ? AND is_active = 1",
+        (user_id,)
+    ).fetchone()
+    if not user:
+        connection.close()
+        raise HTTPException(status_code=401, detail="User account not found.")
+
+    if jti:
+        session = connection.execute(
+            "SELECT id FROM auth_sessions WHERE user_id = ? AND token_jti = ? AND revoked_at IS NULL",
+            (user_id, jti)
+        ).fetchone()
+        if not session:
+            connection.close()
+            raise HTTPException(status_code=401, detail="Session expired or revoked.")
+
+    connection.close()
+    return dict(user)
+
+
+def get_current_user(request: Request):
+    user = get_optional_current_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    return user
+
+
+def safe_user_payload(user_row):
+    if user_row is None:
+        return None
+    return {
+        "id": user_row["id"],
+        "email": user_row["email"],
+        "full_name": user_row["full_name"],
+        "created_at": user_row["created_at"],
+        "updated_at": user_row["updated_at"],
+        "is_active": bool(user_row["is_active"]),
+    }
+
+
+def get_profile_for_user(user_id: int):
+    connection = get_connection()
+    profile = connection.execute(
+        "SELECT * FROM profiles WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+        (user_id,)
+    ).fetchone()
+    connection.close()
+    return dict(profile) if profile else None
+
+
+def ensure_user_profile(user_id: int, full_name: str, email: str):
+    connection = get_connection()
+    profile = connection.execute(
+        "SELECT * FROM profiles WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+        (user_id,)
+    ).fetchone()
+
+    if profile is None:
+        profile = connection.execute(
+            "SELECT * FROM profiles WHERE email = ? ORDER BY id DESC LIMIT 1",
+            (email,)
+        ).fetchone()
+
+    if profile is not None:
+        connection.execute(
+            "UPDATE profiles SET user_id = ?, full_name = ?, email = ?, updated_at = ? WHERE id = ?",
+            (user_id, full_name, email, datetime.now(timezone.utc).isoformat(), profile["id"])
+        )
+        connection.commit()
+        profile = connection.execute("SELECT * FROM profiles WHERE id = ?", (profile["id"],)).fetchone()
+        connection.close()
+        return dict(profile)
+
+    now = datetime.now(timezone.utc).isoformat()
+    cursor = connection.execute(
+        """
+        INSERT INTO profiles (user_id, full_name, email, phone, location, target_role, linkedin_url, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (user_id, full_name, email, None, None, None, None, now, now)
+    )
+    connection.commit()
+    profile = connection.execute("SELECT * FROM profiles WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    connection.close()
+    return dict(profile)
+
+
+def assert_profile_access(profile_id: int, current_user: dict | None):
+    if current_user is None:
+        return
+
+    connection = get_connection()
+    profile = connection.execute("SELECT * FROM profiles WHERE id = ?", (profile_id,)).fetchone()
+
+    if not profile:
+        connection.close()
+        raise HTTPException(status_code=404, detail="Profile not found.")
+
+    if profile["user_id"] is None:
+        if profile["email"] == current_user["email"]:
+            connection.execute(
+                "UPDATE profiles SET user_id = ?, updated_at = ? WHERE id = ?",
+                (current_user["id"], datetime.now(timezone.utc).isoformat(), profile_id)
+            )
+            connection.commit()
+            connection.close()
+            return
+        connection.close()
+        raise HTTPException(status_code=403, detail="You do not have permission to access this profile.")
+
+    if profile["user_id"] != current_user["id"]:
+        connection.close()
+        raise HTTPException(status_code=403, detail="You do not have permission to access this profile.")
+
+    connection.close()
+
+
+@app.post("/auth/register")
+def register_user(request: AuthRegisterInput):
+    full_name = (request.full_name or "").strip()
+    if not full_name:
+        raise HTTPException(status_code=422, detail="Please enter your name.")
+    if len(request.password) < 8:
+        raise HTTPException(status_code=422, detail="Password must be at least 8 characters.")
+    if request.password != request.confirm_password:
+        raise HTTPException(status_code=422, detail="Passwords do not match.")
+
+    connection = get_connection()
+    existing = connection.execute("SELECT id FROM users WHERE email = ?", (str(request.email).lower(),)).fetchone()
+    connection.close()
+    if existing:
+        raise HTTPException(status_code=409, detail="An account with this email already exists.")
+
+    now = datetime.now(timezone.utc).isoformat()
+    connection = get_connection()
+    try:
+        cursor = connection.execute(
+            """
+            INSERT INTO users (email, password_hash, full_name, created_at, updated_at, is_active)
+            VALUES (?, ?, ?, ?, ?, 1)
+            """,
+            (str(request.email).lower(), hash_password(request.password), full_name, now, now)
+        )
+        connection.commit()
+        user_id = cursor.lastrowid
+        user_row = connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    finally:
+        connection.close()
+
+    profile = ensure_user_profile(user_id, full_name, str(request.email).lower())
+    token = create_access_token(user_id)
+
+    return {
+        "token": token,
+        "user": safe_user_payload(user_row),
+        "profile": profile,
+        "message": "Account created successfully."
+    }
+
+
+@app.post("/auth/login")
+def login_user(request: AuthLoginInput):
+    email = str(request.email).lower()
+    connection = get_connection()
+    user = connection.execute("SELECT * FROM users WHERE email = ? AND is_active = 1", (email,)).fetchone()
+    connection.close()
+
+    if not user or not verify_password(request.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Email or password is incorrect.")
+
+    token = create_access_token(user["id"])
+    profile = get_profile_for_user(user["id"])
+    if profile is None:
+        profile = ensure_user_profile(user["id"], user["full_name"], email)
+
+    return {
+        "token": token,
+        "user": safe_user_payload(user),
+        "profile": profile,
+        "message": "Login successful."
+    }
+
+
+@app.post("/auth/logout")
+def logout_user(request: Request):
+    current_user = get_current_user(request)
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.split(" ", 1)[1].strip() if auth_header.startswith("Bearer ") else ""
+    if token:
+        try:
+            payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+            jti = payload.get("jti")
+            if jti:
+                connection = get_connection()
+                connection.execute(
+                    "UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND token_jti = ? AND revoked_at IS NULL",
+                    (datetime.now(timezone.utc).isoformat(), current_user["id"], jti)
+                )
+                connection.commit()
+                connection.close()
+        except Exception:
+            pass
+    return {"message": "Logged out successfully."}
+
+
+@app.get("/auth/me")
+def get_current_auth_profile(request: Request):
+    current_user = get_current_user(request)
+    profile = get_profile_for_user(current_user["id"])
+    if profile is None:
+        profile = ensure_user_profile(current_user["id"], current_user["full_name"], current_user["email"])
+    return {
+        "user": safe_user_payload(current_user),
+        "profile": profile,
+    }
+
+
+@app.put("/auth/profile")
+def update_current_profile(request: Request, payload: AuthProfileInput):
+    current_user = get_current_user(request)
+    connection = get_connection()
+    profile = connection.execute(
+        "SELECT * FROM profiles WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+        (current_user["id"],)
+    ).fetchone()
+
+    if profile is None:
+        profile = connection.execute(
+            "SELECT * FROM profiles WHERE email = ? ORDER BY id DESC LIMIT 1",
+            (current_user["email"],)
+        ).fetchone()
+
+    if profile is None:
+        connection.close()
+        profile = ensure_user_profile(current_user["id"], current_user["full_name"], current_user["email"])
+        connection = get_connection()
+        profile = connection.execute("SELECT * FROM profiles WHERE user_id = ? ORDER BY id DESC LIMIT 1", (current_user["id"],)).fetchone()
+
+    update_map = {
+        "full_name": payload.full_name or profile["full_name"],
+        "email": str(payload.email or profile["email"]).lower(),
+        "phone": payload.phone if payload.phone is not None else profile["phone"],
+        "location": payload.location if payload.location is not None else profile["location"],
+        "target_role": payload.target_role if payload.target_role is not None else profile["target_role"],
+        "linkedin_url": payload.linkedin_url if payload.linkedin_url is not None else profile["linkedin_url"],
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    connection.execute(
+        """
+        UPDATE profiles
+        SET full_name = ?, email = ?, phone = ?, location = ?, target_role = ?, linkedin_url = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            update_map["full_name"],
+            update_map["email"],
+            update_map["phone"],
+            update_map["location"],
+            update_map["target_role"],
+            update_map["linkedin_url"],
+            update_map["updated_at"],
+            profile["id"],
+        )
+    )
+
+    connection.execute(
+        "UPDATE users SET full_name = ?, email = ?, updated_at = ? WHERE id = ?",
+        (update_map["full_name"], update_map["email"], update_map["updated_at"], current_user["id"])
+    )
+    connection.commit()
+    updated = connection.execute("SELECT * FROM profiles WHERE id = ?", (profile["id"],)).fetchone()
+    connection.close()
+    return {"message": "Profile updated successfully.", "profile": dict(updated)}
+
+
+@app.get("/profiles/{profile_id}")
+def get_profile_by_id(profile_id: int, request: Request):
+    current_user = get_optional_current_user(request)
+    if current_user is not None:
+        assert_profile_access(profile_id, current_user)
+
+    connection = get_connection()
+    profile = connection.execute("SELECT * FROM profiles WHERE id = ?", (profile_id,)).fetchone()
+    connection.close()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found.")
+    return dict(profile)
 
 
 # ============================================================
@@ -368,7 +917,7 @@ def initialize_services():
 
         print("\nLoading Job-Resume Matching Service...")
 
-        matching_service = MatchingService()
+        matching_service = MatchingService(job_retriever)
 
         print(
             "Job-Resume Matching Service initialized successfully."
@@ -409,10 +958,14 @@ def health_check():
 # ============================================================
 
 @app.post("/profiles")
-def create_profile(profile: ProfileInput):
+def create_profile(profile: ProfileInput, request: Request):
+    current_user = None
+    try:
+        current_user = get_optional_current_user(request)
+    except HTTPException:
+        current_user = None
 
     connection = get_connection()
-
     existing = connection.execute(
         """
         SELECT *
@@ -420,46 +973,87 @@ def create_profile(profile: ProfileInput):
         WHERE email = ?
         """,
         (
-            str(profile.email),
+            str(profile.email).lower(),
         )
     ).fetchone()
 
+    if current_user is not None:
+        if existing and existing["user_id"] not in (None, current_user["id"]):
+            connection.close()
+            raise HTTPException(status_code=403, detail="You do not have permission to access this profile.")
+        if existing and existing["user_id"] is None:
+            connection.execute(
+                "UPDATE profiles SET user_id = ?, full_name = ?, updated_at = ? WHERE id = ?",
+                (current_user["id"], profile.full_name, datetime.now(timezone.utc).isoformat(), existing["id"])
+            )
+            connection.commit()
+            profile_row = connection.execute("SELECT * FROM profiles WHERE id = ?", (existing["id"],)).fetchone()
+            connection.close()
+            return dict(profile_row)
+
     if existing:
-
         connection.close()
-
         return dict(existing)
 
-    now = datetime.now(
-        timezone.utc
-    ).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     try:
-
-        cursor = connection.execute(
-            """
-            INSERT INTO profiles
-            (
-                full_name,
-                email,
-                phone,
-                location,
-                target_role,
-                linkedin_url,
-                created_at
+        if current_user is not None:
+            cursor = connection.execute(
+                """
+                INSERT INTO profiles
+                (
+                    user_id,
+                    full_name,
+                    email,
+                    phone,
+                    location,
+                    target_role,
+                    linkedin_url,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    current_user["id"],
+                    profile.full_name,
+                    str(profile.email).lower(),
+                    profile.phone,
+                    profile.location,
+                    profile.target_role,
+                    profile.linkedin_url,
+                    now,
+                    now,
+                )
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                profile.full_name,
-                str(profile.email),
-                profile.phone,
-                profile.location,
-                profile.target_role,
-                profile.linkedin_url,
-                now
+        else:
+            cursor = connection.execute(
+                """
+                INSERT INTO profiles
+                (
+                    full_name,
+                    email,
+                    phone,
+                    location,
+                    target_role,
+                    linkedin_url,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    profile.full_name,
+                    str(profile.email).lower(),
+                    profile.phone,
+                    profile.location,
+                    profile.target_role,
+                    profile.linkedin_url,
+                    now,
+                    now,
+                )
             )
-        )
 
         connection.commit()
 
@@ -477,7 +1071,6 @@ def create_profile(profile: ProfileInput):
         return dict(saved_profile)
 
     finally:
-
         connection.close()
 
 
@@ -1101,8 +1694,12 @@ MATCHING EVIDENCE:
 @app.post("/profiles/{profile_id}/resumes")
 async def upload_resume(
     profile_id: int,
+    request: Request,
     file: UploadFile = File(...)
 ):
+    current_user = get_optional_current_user(request)
+    if current_user is not None:
+        assert_profile_access(profile_id, current_user)
 
     # --------------------------------------------------------
     # Validate profile
@@ -1321,7 +1918,10 @@ async def upload_resume(
 # ============================================================
 
 @app.get("/profiles/{profile_id}/resumes/latest")
-def get_latest_resume(profile_id: int):
+def get_latest_resume(profile_id: int, request: Request):
+    current_user = get_optional_current_user(request)
+    if current_user is not None:
+        assert_profile_access(profile_id, current_user)
 
     connection = get_connection()
 
@@ -1415,8 +2015,12 @@ def search_jobs(request: JobSearchInput):
 @app.post("/profiles/{profile_id}/job-matches")
 def get_job_matches(
     profile_id: int,
-    request: JobMatchInput
+    request: JobMatchInput,
+    auth_request: Request
 ):
+    current_user = get_optional_current_user(auth_request)
+    if current_user is not None:
+        assert_profile_access(profile_id, current_user)
 
     if matching_service is None:
 
@@ -1615,17 +2219,38 @@ def get_job_matches(
 
 
 # ============================================================
+# HELPER: CACHED DATA
+# ============================================================
+
+def get_cached_jobs():
+    global JOB_CACHE, JOB_CACHE_BY_ID
+
+    if JOB_CACHE is None:
+        JOB_CACHE = load_all_jobs()
+        JOB_CACHE_BY_ID = {
+            str(job.get("job_id")): job
+            for job in JOB_CACHE
+            if job.get("job_id") is not None
+        }
+
+    return JOB_CACHE
+
+
+# ============================================================
 # HELPER: RESOLVE CANDIDATE & JOB DATA
 # ============================================================
 
 def resolve_candidate_and_job(
     profile_id: int,
     job_id: str | None = None,
-    job_title: str | None = None
+    job_title: str | None = None,
+    current_user: dict | None = None
 ):
     """
     Loads verified candidate profile and resolves target job from dataset or matches.
     """
+    assert_profile_access(profile_id, current_user)
+
     connection = get_connection()
 
     profile_row = connection.execute(
@@ -1672,15 +2297,12 @@ def resolve_candidate_and_job(
         except Exception:
             pass
 
-    # Resolve job
-    all_jobs = load_all_jobs()
+    # Resolve job using cached dataset
+    all_jobs = get_cached_jobs()
     selected_job = None
 
     if job_id:
-        for j in all_jobs:
-            if str(j.get("job_id")) == str(job_id):
-                selected_job = j
-                break
+        selected_job = JOB_CACHE_BY_ID.get(str(job_id))
     elif job_title:
         for j in all_jobs:
             if (
@@ -1710,12 +2332,15 @@ def resolve_candidate_and_job(
 @app.post("/profiles/{profile_id}/skill-gap")
 def analyze_skill_gap(
     profile_id: int,
-    request: SkillGapInput
+    request: SkillGapInput,
+    auth_request: Request
 ):
+    current_user = get_optional_current_user(auth_request)
     candidate, job = resolve_candidate_and_job(
         profile_id=profile_id,
         job_id=request.job_id,
-        job_title=request.job_title
+        job_title=request.job_title,
+        current_user=current_user
     )
 
     result = skill_gap_agent.analyze_skill_gap(
@@ -1755,12 +2380,15 @@ def analyze_skill_gap(
 @app.post("/profiles/{profile_id}/customize-resume")
 def customize_resume(
     profile_id: int,
-    request: ResumeCustomizationInput
+    request: ResumeCustomizationInput,
+    auth_request: Request
 ):
+    current_user = get_optional_current_user(auth_request)
     candidate, job = resolve_candidate_and_job(
         profile_id=profile_id,
         job_id=request.job_id,
-        job_title=request.job_title
+        job_title=request.job_title,
+        current_user=current_user
     )
 
     result = application_agent.customize_resume(
@@ -1799,12 +2427,15 @@ def customize_resume(
 @app.post("/profiles/{profile_id}/cover-letter")
 def generate_cover_letter(
     profile_id: int,
-    request: CoverLetterInput
+    request: CoverLetterInput,
+    auth_request: Request
 ):
+    current_user = get_optional_current_user(auth_request)
     candidate, job = resolve_candidate_and_job(
         profile_id=profile_id,
         job_id=request.job_id,
-        job_title=request.job_title
+        job_title=request.job_title,
+        current_user=current_user
     )
 
     result = application_agent.generate_cover_letter(
@@ -1843,12 +2474,15 @@ def generate_cover_letter(
 @app.post("/profiles/{profile_id}/interview-prep")
 def generate_interview_prep(
     profile_id: int,
-    request: InterviewPrepInput
+    request: InterviewPrepInput,
+    auth_request: Request
 ):
+    current_user = get_optional_current_user(auth_request)
     candidate, job = resolve_candidate_and_job(
         profile_id=profile_id,
         job_id=request.job_id,
-        job_title=request.job_title
+        job_title=request.job_title,
+        current_user=current_user
     )
 
     # Check if recent skill gap exists for additional context
@@ -1911,12 +2545,15 @@ def generate_interview_prep(
 @app.post("/profiles/{profile_id}/mock-interview/start")
 def start_mock_interview(
     profile_id: int,
-    request: MockInterviewStartInput
+    request: MockInterviewStartInput,
+    auth_request: Request
 ):
+    current_user = get_optional_current_user(auth_request)
     candidate, job = resolve_candidate_and_job(
         profile_id=profile_id,
         job_id=request.job_id,
-        job_title=request.job_title
+        job_title=request.job_title,
+        current_user=current_user
     )
 
     # Generate complete question bank
@@ -1992,8 +2629,12 @@ def start_mock_interview(
 @app.post("/profiles/{profile_id}/mock-interview/answer")
 def submit_mock_interview_answer(
     profile_id: int,
-    request: MockInterviewAnswerInput
+    request: MockInterviewAnswerInput,
+    auth_request: Request
 ):
+    current_user = get_optional_current_user(auth_request)
+    if current_user is not None:
+        assert_profile_access(profile_id, current_user)
     connection = get_connection()
     session = connection.execute(
         """
@@ -2092,8 +2733,12 @@ def submit_mock_interview_answer(
 @app.get("/profiles/{profile_id}/mock-interview/{interview_id}")
 def get_mock_interview_details(
     profile_id: int,
-    interview_id: int
+    interview_id: int,
+    request: Request
 ):
+    current_user = get_optional_current_user(request)
+    if current_user is not None:
+        assert_profile_access(profile_id, current_user)
     connection = get_connection()
     session = connection.execute(
         """
@@ -2140,14 +2785,410 @@ def get_mock_interview_details(
 
 
 # ============================================================
+# M4.1 — APPLICATION TRACKING & MANAGEMENT APIS
+# ============================================================
+
+def format_application_row(row, connection=None):
+    if not row:
+        return None
+    app_dict = dict(row)
+
+    for key in ["customized_resume", "cover_letter"]:
+        val = app_dict.get(key)
+        if val and isinstance(val, str):
+            try:
+                app_dict[key] = json.loads(val)
+            except Exception:
+                pass
+
+    if connection and app_dict.get("job_id") and app_dict.get("profile_id"):
+        if not app_dict.get("customized_resume"):
+            cr_row = connection.execute(
+                "SELECT resume_json FROM customized_resumes WHERE profile_id = ? AND job_id = ? ORDER BY id DESC LIMIT 1",
+                (app_dict["profile_id"], str(app_dict["job_id"]))
+            ).fetchone()
+            if cr_row and cr_row["resume_json"]:
+                try:
+                    app_dict["customized_resume"] = json.loads(cr_row["resume_json"])
+                except Exception:
+                    app_dict["customized_resume"] = cr_row["resume_json"]
+
+        if not app_dict.get("cover_letter"):
+            cl_row = connection.execute(
+                "SELECT letter_json FROM cover_letters WHERE profile_id = ? AND job_id = ? ORDER BY id DESC LIMIT 1",
+                (app_dict["profile_id"], str(app_dict["job_id"]))
+            ).fetchone()
+            if cl_row and cl_row["letter_json"]:
+                try:
+                    app_dict["cover_letter"] = json.loads(cl_row["letter_json"])
+                except Exception:
+                    app_dict["cover_letter"] = cl_row["letter_json"]
+
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    deadline_status = "none"
+    if app_dict.get("deadline"):
+        d_str = str(app_dict["deadline"])[:10]
+        if d_str < today_str:
+            deadline_status = "overdue"
+        elif d_str == today_str:
+            deadline_status = "due_today"
+        else:
+            deadline_status = "upcoming"
+    app_dict["deadline_status"] = deadline_status
+    return app_dict
+
+
+@app.post("/profiles/{profile_id}/applications")
+def create_application(
+    profile_id: int,
+    request: ApplicationCreateInput,
+    auth_request: Request
+):
+    current_user = get_optional_current_user(auth_request)
+    if current_user is not None:
+        assert_profile_access(profile_id, current_user)
+
+    connection = get_connection()
+    try:
+        profile = connection.execute(
+            "SELECT id FROM profiles WHERE id = ?", (profile_id,)
+        ).fetchone()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found.")
+
+        if request.status and request.status not in VALID_APPLICATION_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status '{request.status}'. Allowed: {', '.join(VALID_APPLICATION_STATUSES)}"
+            )
+
+        if request.job_id:
+            existing = connection.execute(
+                "SELECT id FROM applications WHERE profile_id = ? AND job_id = ?",
+                (profile_id, str(request.job_id))
+            ).fetchone()
+            if existing:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"An application for job ID '{request.job_id}' already exists for this profile."
+                )
+
+        now = datetime.now(timezone.utc).isoformat()
+        app_date = request.application_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        cust_resume_str = json.dumps(request.customized_resume) if isinstance(request.customized_resume, (dict, list)) else request.customized_resume
+        cover_letter_str = json.dumps(request.cover_letter) if isinstance(request.cover_letter, (dict, list)) else request.cover_letter
+
+        cursor = connection.execute(
+            """
+            INSERT INTO applications (
+                profile_id, job_id, company_name, job_title, job_description,
+                application_date, deadline, status, interview_date, interview_status,
+                notes, follow_up_date, customized_resume, cover_letter, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                profile_id,
+                str(request.job_id) if request.job_id else None,
+                request.company_name.strip(),
+                request.job_title.strip(),
+                request.job_description,
+                app_date,
+                request.deadline,
+                request.status,
+                request.interview_date,
+                request.interview_status,
+                request.notes,
+                request.follow_up_date,
+                cust_resume_str,
+                cover_letter_str,
+                now,
+                now,
+            )
+        )
+        connection.commit()
+        app_id = cursor.lastrowid
+        row = connection.execute("SELECT * FROM applications WHERE id = ?", (app_id,)).fetchone()
+        return format_application_row(row, connection)
+    finally:
+        connection.close()
+
+
+@app.get("/profiles/{profile_id}/applications")
+def get_applications(
+    profile_id: int,
+    auth_request: Request,
+    search: str | None = None,
+    company: str | None = None,
+    role: str | None = None,
+    status: str | None = None,
+    deadline_filter: str | None = None,
+    application_date: str | None = None
+):
+    current_user = get_optional_current_user(auth_request)
+    if current_user is not None:
+        assert_profile_access(profile_id, current_user)
+
+    connection = get_connection()
+    try:
+        profile = connection.execute(
+            "SELECT id FROM profiles WHERE id = ?", (profile_id,)
+        ).fetchone()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found.")
+
+        query = "SELECT * FROM applications WHERE profile_id = ?"
+        params = [profile_id]
+
+        if company:
+            query += " AND LOWER(company_name) LIKE ?"
+            params.append(f"%{company.lower().strip()}%")
+
+        if role:
+            query += " AND LOWER(job_title) LIKE ?"
+            params.append(f"%{role.lower().strip()}%")
+
+        if status:
+            query += " AND status = ?"
+            params.append(status.strip())
+
+        if application_date:
+            query += " AND application_date LIKE ?"
+            params.append(f"{application_date}%")
+
+        if search:
+            s = f"%{search.lower().strip()}%"
+            query += " AND (LOWER(company_name) LIKE ? OR LOWER(job_title) LIKE ? OR LOWER(COALESCE(job_description, '')) LIKE ? OR LOWER(COALESCE(notes, '')) LIKE ?)"
+            params.extend([s, s, s, s])
+
+        query += " ORDER BY updated_at DESC, id DESC"
+
+        rows = connection.execute(query, params).fetchall()
+        results = [format_application_row(r, connection) for r in rows]
+
+        if deadline_filter:
+            today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if deadline_filter == "upcoming":
+                results = [r for r in results if r.get("deadline") and str(r["deadline"])[:10] >= today_str]
+            elif deadline_filter == "overdue":
+                results = [r for r in results if r.get("deadline") and str(r["deadline"])[:10] < today_str and r.get("status") not in ["Rejected", "Withdrawn", "Offer received"]]
+            elif deadline_filter == "has_deadline":
+                results = [r for r in results if r.get("deadline")]
+
+        return {"profile_id": profile_id, "count": len(results), "applications": results}
+    finally:
+        connection.close()
+
+
+@app.get("/profiles/{profile_id}/applications/dashboard")
+def get_application_dashboard(
+    profile_id: int,
+    auth_request: Request
+):
+    current_user = get_optional_current_user(auth_request)
+    if current_user is not None:
+        assert_profile_access(profile_id, current_user)
+
+    connection = get_connection()
+    try:
+        profile = connection.execute(
+            "SELECT id FROM profiles WHERE id = ?", (profile_id,)
+        ).fetchone()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found.")
+
+        rows = connection.execute(
+            "SELECT * FROM applications WHERE profile_id = ? ORDER BY updated_at DESC",
+            (profile_id,)
+        ).fetchall()
+        apps = [format_application_row(r, connection) for r in rows]
+
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        total_applications = len(apps)
+        active_applications = sum(1 for a in apps if a["status"] not in ["Rejected", "Withdrawn"])
+        offers_received = sum(1 for a in apps if a["status"] == "Offer received")
+        rejected_applications = sum(1 for a in apps if a["status"] == "Rejected")
+
+        upcoming_deadlines_count = sum(
+            1 for a in apps
+            if a.get("deadline") and str(a["deadline"])[:10] >= today_str and a["status"] not in ["Rejected", "Withdrawn", "Offer received"]
+        )
+
+        interviews_scheduled_count = sum(
+            1 for a in apps
+            if a["status"] == "Interview scheduled" or (a.get("interview_date") and str(a["interview_date"])[:10] >= today_str and a["status"] not in ["Rejected", "Withdrawn"])
+        )
+
+        upcoming_deadlines_list = [
+            a for a in apps
+            if a.get("deadline") and str(a["deadline"])[:10] >= today_str and a["status"] not in ["Rejected", "Withdrawn", "Offer received"]
+        ]
+        upcoming_deadlines_list.sort(key=lambda x: str(x.get("deadline")))
+
+        recent_applications_list = sorted(apps, key=lambda x: str(x.get("created_at")), reverse=True)[:5]
+
+        upcoming_interviews_list = [
+            a for a in apps
+            if a.get("interview_date") and str(a["interview_date"])[:10] >= today_str and a["status"] not in ["Rejected", "Withdrawn"]
+        ]
+        upcoming_interviews_list.sort(key=lambda x: str(x.get("interview_date")))
+
+        needing_followup_list = [
+            a for a in apps
+            if a.get("follow_up_date") and a["status"] not in ["Rejected", "Withdrawn", "Offer received"]
+        ]
+        needing_followup_list.sort(key=lambda x: str(x.get("follow_up_date")))
+
+        return {
+            "profile_id": profile_id,
+            "metrics": {
+                "total_applications": total_applications,
+                "active_applications": active_applications,
+                "upcoming_deadlines": upcoming_deadlines_count,
+                "interviews_scheduled": interviews_scheduled_count,
+                "offers_received": offers_received,
+                "rejected_applications": rejected_applications,
+            },
+            "lists": {
+                "upcoming_deadlines": upcoming_deadlines_list[:5],
+                "recent_applications": recent_applications_list,
+                "upcoming_interviews": upcoming_interviews_list[:5],
+                "needing_followup": needing_followup_list[:5],
+            }
+        }
+    finally:
+        connection.close()
+
+
+@app.get("/profiles/{profile_id}/applications/{application_id}")
+def get_application_by_id(
+    profile_id: int,
+    application_id: int,
+    auth_request: Request
+):
+    current_user = get_optional_current_user(auth_request)
+    if current_user is not None:
+        assert_profile_access(profile_id, current_user)
+
+    connection = get_connection()
+    try:
+        row = connection.execute(
+            "SELECT * FROM applications WHERE id = ? AND profile_id = ?",
+            (application_id, profile_id)
+        ).fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Application not found.")
+
+        return format_application_row(row, connection)
+    finally:
+        connection.close()
+
+
+@app.put("/profiles/{profile_id}/applications/{application_id}")
+def update_application(
+    profile_id: int,
+    application_id: int,
+    request: ApplicationUpdateInput,
+    auth_request: Request
+):
+    current_user = get_optional_current_user(auth_request)
+    if current_user is not None:
+        assert_profile_access(profile_id, current_user)
+
+    connection = get_connection()
+    try:
+        existing = connection.execute(
+            "SELECT * FROM applications WHERE id = ? AND profile_id = ?",
+            (application_id, profile_id)
+        ).fetchone()
+
+        if not existing:
+            raise HTTPException(status_code=404, detail="Application not found.")
+
+        if request.status and request.status not in VALID_APPLICATION_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status '{request.status}'. Allowed: {', '.join(VALID_APPLICATION_STATUSES)}"
+            )
+
+        update_data = request.model_dump(exclude_unset=True)
+        if not update_data:
+            return format_application_row(existing, connection)
+
+        set_clauses = []
+        params = []
+        for key, value in update_data.items():
+            if key in ["customized_resume", "cover_letter"] and isinstance(value, (dict, list)):
+                value = json.dumps(value)
+            set_clauses.append(f"{key} = ?")
+            params.append(value)
+
+        now = datetime.now(timezone.utc).isoformat()
+        set_clauses.append("updated_at = ?")
+        params.append(now)
+
+        params.extend([application_id, profile_id])
+        query = f"UPDATE applications SET {', '.join(set_clauses)} WHERE id = ? AND profile_id = ?"
+        connection.execute(query, params)
+        connection.commit()
+
+        updated_row = connection.execute(
+            "SELECT * FROM applications WHERE id = ? AND profile_id = ?",
+            (application_id, profile_id)
+        ).fetchone()
+        return format_application_row(updated_row, connection)
+    finally:
+        connection.close()
+
+
+@app.delete("/profiles/{profile_id}/applications/{application_id}")
+def delete_application(
+    profile_id: int,
+    application_id: int,
+    auth_request: Request
+):
+    current_user = get_optional_current_user(auth_request)
+    if current_user is not None:
+        assert_profile_access(profile_id, current_user)
+
+    connection = get_connection()
+    try:
+        existing = connection.execute(
+            "SELECT * FROM applications WHERE id = ? AND profile_id = ?",
+            (application_id, profile_id)
+        ).fetchone()
+
+        if not existing:
+            raise HTTPException(status_code=404, detail="Application not found.")
+
+        connection.execute(
+            "DELETE FROM applications WHERE id = ? AND profile_id = ?",
+            (application_id, profile_id)
+        )
+        connection.commit()
+        return {"message": "Application deleted successfully", "application_id": application_id}
+    finally:
+        connection.close()
+
+
+# ============================================================
 # M3.4 — CONVERSATIONAL CAREER ASSISTANT
 # ============================================================
 
 @app.post("/career-assistant/chat")
-def chat_career_assistant(request: CareerAssistantInput):
+def chat_career_assistant(request: CareerAssistantInput, auth_request: Request):
+    current_user = get_optional_current_user(auth_request)
+    if request.profile_id and current_user is not None:
+        assert_profile_access(request.profile_id, current_user)
+
     profile = {}
     job = {}
     skill_gap = {}
+    conversation_id = request.conversation_id or (
+        f"profile_{request.profile_id}_default" if request.profile_id else "default_conversation"
+    )
 
     connection = get_connection()
 
@@ -2181,11 +3222,13 @@ def chat_career_assistant(request: CareerAssistantInput):
                         pass
 
     if request.job_id:
-        all_jobs = load_all_jobs()
-        for j in all_jobs:
-            if str(j.get("job_id")) == str(request.job_id):
-                job = j
-                break
+        all_jobs = get_cached_jobs()
+        job = JOB_CACHE_BY_ID.get(str(request.job_id), {})
+        if not job:
+            for j in all_jobs:
+                if str(j.get("job_id")) == str(request.job_id):
+                    job = j
+                    break
 
     # Run conversational assistant turn
     response = career_assistant.chat(
@@ -2195,6 +3238,7 @@ def chat_career_assistant(request: CareerAssistantInput):
         skill_gap=skill_gap,
         history=request.history
     )
+    response["conversation_id"] = conversation_id
 
     # Persist chat message if profile_id is provided
     if request.profile_id:
@@ -2203,20 +3247,21 @@ def chat_career_assistant(request: CareerAssistantInput):
             # User message
             connection.execute(
                 """
-                INSERT INTO chat_messages (profile_id, job_id, role, content, context_used_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO chat_messages (profile_id, job_id, conversation_id, role, content, context_used_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (request.profile_id, request.job_id, "user", request.message, None, now)
+                (request.profile_id, request.job_id, conversation_id, "user", request.message, None, now)
             )
             # Assistant response
             connection.execute(
                 """
-                INSERT INTO chat_messages (profile_id, job_id, role, content, context_used_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO chat_messages (profile_id, job_id, conversation_id, role, content, context_used_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     request.profile_id,
                     request.job_id,
+                    conversation_id,
                     "assistant",
                     response.get("message", ""),
                     json.dumps(response.get("context_used", {})),
@@ -2232,22 +3277,38 @@ def chat_career_assistant(request: CareerAssistantInput):
 
 
 @app.get("/career-assistant/history/{profile_id}")
-def get_chat_history(profile_id: int):
+def get_chat_history(profile_id: int, request: Request, conversation_id: str | None = None):
+    current_user = get_optional_current_user(request)
+    if current_user is not None:
+        assert_profile_access(profile_id, current_user)
     connection = get_connection()
-    messages = connection.execute(
-        """
-        SELECT role, content, created_at, job_id
-        FROM chat_messages
-        WHERE profile_id = ?
-        ORDER BY id ASC
-        LIMIT 50
-        """,
-        (profile_id,)
-    ).fetchall()
+    if conversation_id:
+        messages = connection.execute(
+            """
+            SELECT role, content, created_at, job_id, conversation_id
+            FROM chat_messages
+            WHERE profile_id = ? AND conversation_id = ?
+            ORDER BY id ASC
+            LIMIT 50
+            """,
+            (profile_id, conversation_id)
+        ).fetchall()
+    else:
+        messages = connection.execute(
+            """
+            SELECT role, content, created_at, job_id, conversation_id
+            FROM chat_messages
+            WHERE profile_id = ?
+            ORDER BY id ASC
+            LIMIT 50
+            """,
+            (profile_id,)
+        ).fetchall()
     connection.close()
 
     return {
         "profile_id": profile_id,
+        "conversation_id": conversation_id,
         "messages": [dict(m) for m in messages]
     }
 

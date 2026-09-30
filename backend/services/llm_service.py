@@ -35,6 +35,7 @@ class LLMService:
 
     def __init__(self):
         self.model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.request_timeout_ms = int(os.getenv("GEMINI_TIMEOUT_MS", "20000"))
 
     def get_client(self):
         if self._client is not None:
@@ -46,7 +47,11 @@ class LLMService:
 
         try:
             from google import genai
-            self._client = genai.Client(api_key=api_key)
+            from google.genai import types
+            self._client = genai.Client(
+                api_key=api_key,
+                http_options=types.HttpOptions(timeout=self.request_timeout_ms),
+            )
             return self._client
         except Exception as error:
             raise RuntimeError(f"Failed to initialize Gemini Client: {error}")
@@ -108,6 +113,7 @@ class LLMService:
                 config = types.GenerateContentConfig(
                     temperature=temperature,
                     system_instruction=system_instruction,
+                    http_options=types.HttpOptions(timeout=self.request_timeout_ms),
                 )
                 response = client.models.generate_content(
                     model=model,

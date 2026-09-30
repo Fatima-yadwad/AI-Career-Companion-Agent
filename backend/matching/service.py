@@ -7,8 +7,8 @@ from backend.matching.matcher import calculate_job_match
 
 class MatchingService:
 
-    def __init__(self):
-        self.retriever = JobRetriever()
+    def __init__(self, retriever=None):
+        self.retriever = retriever or JobRetriever()
 
     def match_candidate(
         self,
