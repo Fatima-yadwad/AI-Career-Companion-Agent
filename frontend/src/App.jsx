@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-const API_BASE = "http://127.0.0.1:8001";
+const API_BASE = "http://127.0.0.1:8000";
 
 const APPLICATION_STATUSES = [
   { value: "Saved", label: "Saved", badgeClass: "badge-gray", icon: "🔖" },
