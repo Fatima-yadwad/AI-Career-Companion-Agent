@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import "./App.css";
-
+import Auth from "./Auth";
 const API_BASE =
   import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
 const APPLICATION_STATUSES = [
@@ -29,6 +29,10 @@ const NAV_ITEMS = [
 ];
 
 function App() {
+  
+  const [authUser, setAuthUser] = useState(null);
+  const [authChecking, setAuthChecking] = useState(true);
+
   const [activePage, setActivePage] = useState("dashboard");
 
   const [profileId, setProfileId] = useState(
@@ -67,49 +71,137 @@ function App() {
   const [applications, setApplications] = useState([]);
   const [appDashboard, setAppDashboard] = useState(null);
   const [appLoading, setAppLoading] = useState(false);
+  
+ 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkSession() {
+      const token = localStorage.getItem("career_auth_token");
+
+      if (!token) {
+        if (!cancelled) {
+          setAuthUser(null);
+          setAuthChecking(false);
+        }
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_BASE}/auth/me`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error("Session expired");
+        }
+
+        const data = await response.json();
+
+        if (cancelled) return;
+
+        setAuthUser(data.user);
+
+        const id =
+          data.profile?.profile_id ??
+          data.profile?.id ??
+          data.user?.profile_id;
+
+        if (id !== undefined && id !== null) {
+          localStorage.setItem("career_profile_id", String(id));
+          setProfileId(String(id));
+        } else {
+          localStorage.removeItem("career_profile_id");
+          setProfileId("");
+        }
+      } catch {
+        if (!cancelled) {
+          localStorage.removeItem("career_auth_token");
+          localStorage.removeItem("career_auth_user");
+          localStorage.removeItem("career_profile_id");
+          setAuthUser(null);
+          setProfileId("");
+        }
+      } finally {
+        if (!cancelled) {
+          setAuthChecking(false);
+        }
+      }
+    }
+
+    checkSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
-    if (!profileId) return;
+    if (authChecking || !authUser || !profileId) return;
 
     const storageKey = `career_chat_session_${profileId}`;
     const savedSessionId = localStorage.getItem(storageKey);
-    const nextSessionId = savedSessionId || `profile_${profileId}_default`;
+    const nextSessionId =
+      savedSessionId || `profile_${profileId}_default`;
+
     localStorage.setItem(storageKey, nextSessionId);
     setChatSessionId(nextSessionId);
     loadProfileData();
-  }, [profileId]);
+  }, [profileId, authChecking, authUser]);
 
   useEffect(() => {
-    if (!profileId || !chatSessionId) return;
+    if (
+      authChecking ||
+      !authUser ||
+      !profileId ||
+      !chatSessionId
+    ) {
+      return;
+    }
 
-    const historyUrl = `/career-assistant/history/${profileId}?conversation_id=${encodeURIComponent(chatSessionId)}`;
+    const historyUrl =
+      `/career-assistant/history/${profileId}?conversation_id=${encodeURIComponent(chatSessionId)}`;
+
     apiRequest(historyUrl)
       .then((historyData) => {
-        const sessionMessages = (historyData?.messages || []).map((item) => ({
-          role: item.role,
-          content: item.content,
-          suggested_followups: item.suggested_followups || [],
-        }));
+        const sessionMessages = (historyData?.messages || []).map(
+          (item) => ({
+            role: item.role,
+            content: item.content,
+            suggested_followups: item.suggested_followups || [],
+          })
+        );
+
         setChatMessages(sessionMessages);
       })
       .catch(() => {
         setChatMessages([]);
       });
-  }, [profileId, chatSessionId]);
+  }, [profileId, chatSessionId, authChecking, authUser]);
 
   async function apiRequest(endpoint, options = {}) {
     const timeoutMs = Number(options.timeoutMs ?? 25000);
     const controller = new AbortController();
     const signal = options.signal || controller.signal;
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const token = localStorage.getItem("career_auth_token");
 
     try {
       const response = await fetch(`${API_BASE}${endpoint}`, {
         ...options,
+        headers: {
+          ...(options.headers || {}),
+          ...(token
+            ? { Authorization: `Bearer ${token}` }
+            : {}),
+        },
         signal,
       });
 
       let data = null;
+
       try {
         data = await response.json();
       } catch {
@@ -118,7 +210,9 @@ function App() {
 
       if (!response.ok) {
         throw new Error(
-          data?.detail || data?.message || `Request failed (${response.status})`
+          data?.detail ||
+          data?.message ||
+          `Request failed (${response.status})`
         );
       }
 
@@ -127,6 +221,7 @@ function App() {
       if (error?.name === "AbortError") {
         throw new Error("The request timed out. Please try again.");
       }
+
       throw error;
     } finally {
       clearTimeout(timer);
@@ -152,8 +247,10 @@ function App() {
           body: JSON.stringify({ top_k: 6 }),
         }
       );
+
       const fetchedJobs = matches.results || [];
       setJobs(fetchedJobs);
+
       if (fetchedJobs.length > 0 && !selectedJob) {
         setSelectedJob(fetchedJobs[0]);
       }
@@ -166,15 +263,21 @@ function App() {
 
   async function loadApplicationsData(profId = profileId) {
     if (!profId) return;
+
     setAppLoading(true);
+
     try {
-      const listData = await apiRequest(`/profiles/${profId}/applications`);
+      const listData = await apiRequest(
+        `/profiles/${profId}/applications`
+      );
       setApplications(listData?.applications || []);
 
-      const dashData = await apiRequest(`/profiles/${profId}/applications/dashboard`);
+      const dashData = await apiRequest(
+        `/profiles/${profId}/applications/dashboard`
+      );
       setAppDashboard(dashData || null);
     } catch (err) {
-      // ignore
+      console.error("Could not load applications:", err);
     } finally {
       setAppLoading(false);
     }
@@ -182,13 +285,17 @@ function App() {
 
   async function trackApplication(job) {
     if (!profileId) {
-      setError("Please create or select a profile before tracking applications.");
+      setError(
+        "Please create or select a profile before tracking applications."
+      );
       setActivePage("profile");
       return;
     }
+
     setLoading(true);
     setError("");
     setMessage("");
+
     try {
       const payload = {
         job_id: String(job.job_id || ""),
@@ -198,17 +305,24 @@ function App() {
         deadline: job.deadline || "",
         status: "Saved",
       };
+
       await apiRequest(`/profiles/${profileId}/applications`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      setMessage(`✓ Tracked "${job.job_title}" at ${job.company} in your applications!`);
+
+      setMessage(
+        `✓ Tracked "${job.job_title}" at ${job.company} in your applications!`
+      );
+
       await loadApplicationsData(profileId);
       setActivePage("applications");
     } catch (err) {
       if (err.message?.includes("already exists")) {
-        setMessage(`ℹ "${job.job_title}" at ${job.company} is already in your tracker.`);
+        setMessage(
+          `ℹ "${job.job_title}" at ${job.company} is already in your tracker.`
+        );
         await loadApplicationsData(profileId);
         setActivePage("applications");
       } else {
@@ -221,20 +335,30 @@ function App() {
 
   async function saveApplication(appData, appId = null) {
     if (!profileId) return;
+
     setLoading(true);
     setError("");
     setMessage("");
+
     try {
       const endpoint = appId
         ? `/profiles/${profileId}/applications/${appId}`
         : `/profiles/${profileId}/applications`;
+
       const method = appId ? "PUT" : "POST";
+
       await apiRequest(endpoint, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(appData),
       });
-      setMessage(appId ? "✓ Application updated successfully!" : "✓ New application added successfully!");
+
+      setMessage(
+        appId
+          ? "✓ Application updated successfully!"
+          : "✓ New application added successfully!"
+      );
+
       await loadApplicationsData(profileId);
     } catch (err) {
       setError(err.message);
@@ -246,12 +370,17 @@ function App() {
 
   async function updateApplicationStatus(appId, newStatus) {
     if (!profileId) return;
+
     try {
-      await apiRequest(`/profiles/${profileId}/applications/${appId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
-      });
+      await apiRequest(
+        `/profiles/${profileId}/applications/${appId}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: newStatus }),
+        }
+      );
+
       await loadApplicationsData(profileId);
     } catch (err) {
       setError(err.message);
@@ -260,11 +389,15 @@ function App() {
 
   async function deleteApplication(appId) {
     if (!profileId) return;
+
     setLoading(true);
+
     try {
-      await apiRequest(`/profiles/${profileId}/applications/${appId}`, {
-        method: "DELETE",
-      });
+      await apiRequest(
+        `/profiles/${profileId}/applications/${appId}`,
+        { method: "DELETE" }
+      );
+
       setMessage("✓ Application deleted.");
       await loadApplicationsData(profileId);
     } catch (err) {
@@ -277,8 +410,14 @@ function App() {
   function startNewChat() {
     if (!profileId) return;
 
-    const nextSessionId = `profile_${profileId}_chat_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
-    localStorage.setItem(`career_chat_session_${profileId}`, nextSessionId);
+    const nextSessionId =
+      `profile_${profileId}_chat_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+
+    localStorage.setItem(
+      `career_chat_session_${profileId}`,
+      nextSessionId
+    );
+
     setChatSessionId(nextSessionId);
     setChatMessages([]);
     setError("");
@@ -298,6 +437,7 @@ function App() {
       });
 
       const newId = String(data.id);
+
       setProfileId(newId);
       localStorage.setItem("career_profile_id", newId);
       setMessage("Profile saved successfully.");
@@ -311,6 +451,7 @@ function App() {
 
   async function uploadResume(event) {
     const file = event.target.files?.[0];
+
     if (!file || !profileId) return;
 
     setLoading(true);
@@ -321,13 +462,19 @@ function App() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const data = await apiRequest(`/profiles/${profileId}/resumes`, {
-        method: "POST",
-        body: formData,
-      });
+      const data = await apiRequest(
+        `/profiles/${profileId}/resumes`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
 
       setResume(data);
-      setMessage("Resume uploaded and analyzed successfully with AI extraction.");
+      setMessage(
+        "Resume uploaded and analyzed successfully with AI extraction."
+      );
+
       await loadProfileData();
     } catch (err) {
       setError(err.message);
@@ -348,17 +495,24 @@ function App() {
     setMessage("");
 
     try {
-      const data = await apiRequest(`/profiles/${profileId}/job-matches`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ top_k: 6 }),
-      });
+      const data = await apiRequest(
+        `/profiles/${profileId}/job-matches`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ top_k: 6 }),
+        }
+      );
 
       setJobs(data.results || []);
+
       if (data.results?.length > 0) {
         setSelectedJob(data.results[0]);
       }
-      setMessage(`${data.results?.length || 0} matching jobs loaded.`);
+
+      setMessage(
+        `${data.results?.length || 0} matching jobs loaded.`
+      );
     } catch (err) {
       setError(err.message);
     } finally {
@@ -368,6 +522,7 @@ function App() {
 
   async function searchJobs(event) {
     event.preventDefault();
+
     if (!searchQuery.trim()) {
       refreshMatches();
       return;
@@ -380,7 +535,10 @@ function App() {
       const data = await apiRequest("/jobs/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: searchQuery, top_k: 8 }),
+        body: JSON.stringify({
+          query: searchQuery,
+          top_k: 8,
+        }),
       });
 
       setJobs(data.results || data.jobs || []);
@@ -390,6 +548,73 @@ function App() {
     } finally {
       setLoading(false);
     }
+  }
+  
+  function handleAuthSuccess(data) {
+    setAuthUser(data.user);
+
+    const id =
+      data.profile?.profile_id ??
+      data.profile?.id ??
+      data.user?.profile_id;
+
+    if (id !== undefined && id !== null) {
+      const nextId = String(id);
+      localStorage.setItem("career_profile_id", nextId);
+      setProfileId(nextId);
+    } else {
+      localStorage.removeItem("career_profile_id");
+      setProfileId("");
+    }
+
+    setError("");
+    setMessage("");
+  }
+
+  function handleLogout() {
+    const token = localStorage.getItem("career_auth_token");
+
+    if (token) {
+      fetch(`${API_BASE}/auth/logout`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }).catch(() => {});
+    }
+
+    localStorage.removeItem("career_auth_token");
+    localStorage.removeItem("career_auth_user");
+    localStorage.removeItem("career_profile_id");
+
+    setAuthUser(null);
+    setAuthChecking(false);
+    setProfileId("");
+
+    setProfile({
+      full_name: "",
+      email: "",
+      phone: "",
+      location: "",
+      target_role: "",
+      linkedin_url: "",
+    });
+
+    setResume(null);
+    setJobs([]);
+    setSelectedJob(null);
+    setSkillGap(null);
+    setTailoredResume(null);
+    setCoverLetter(null);
+    setInterviewPrep(null);
+    setMockSession(null);
+    setChatMessages([]);
+    setChatSessionId("");
+    setApplications([]);
+    setAppDashboard(null);
+    setActivePage("dashboard");
+    setError("");
+    setMessage("");
   }
 
   // ============================================================
@@ -649,12 +874,30 @@ function App() {
     .join("")
     .toUpperCase();
 
+  
   const skills = useMemo(() => {
     return resume?.extracted_profile?.skills || [];
   }, [resume]);
 
+  // Show the session check before rendering the application.
+  if (authChecking) {
+    return (
+      <div className="auth-page">
+        <div className="auth-form-section">
+          <p>Checking your session...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show Login / Sign Up when the user is not authenticated.
+  if (!authUser) {
+    return <Auth onAuthSuccess={handleAuthSuccess} />;
+  }
+
   return (
     <div className="app-shell">
+
       <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
         <div className="brand">
           <div className="brand-mark">
@@ -1008,7 +1251,7 @@ function Dashboard({
       <section className="m3-launchpad">
         <div className="launchpad-header">
           <div>
-            <span className="section-kicker">MILESTONE 3 AGENT SUITE</span>
+            <span className="section-kicker">AI CAREER TOOLS</span>
             <h3>What would you like to accomplish today?</h3>
           </div>
         </div>
@@ -1048,7 +1291,7 @@ function Dashboard({
         <div className="panel large-panel">
           <div className="panel-header">
             <div>
-              <div className="section-kicker">M2 · INTELLIGENT MATCHING</div>
+              <div className="section-kicker">INTELLIGENT JOB MATCHING</div>
               <h3>Top Career Opportunities</h3>
             </div>
 
@@ -1367,7 +1610,7 @@ function JobsPage({
   return (
     <div className="page">
       <PageIntro
-        kicker="M2 · RAG & DETERMINISTIC MATCHING"
+        kicker="SMART JOB MATCHING"
         title="Opportunities Ranked for Your Profile"
         description="Jobs are retrieved using 384-dimensional FAISS semantic embeddings and deterministic multi-criteria scoring."
       />
@@ -1617,7 +1860,7 @@ function SkillGapPage({
           <button className="back-button" onClick={() => navigate("jobs")}>
             ← Back to Opportunities
           </button>
-          <div className="section-kicker">MILESTONE 3.1 · AUTONOMOUS SKILL GAP AGENT</div>
+          <div className="section-kicker">SKILL GAP ANALYSIS</div>
           <h1>Multi-Dimensional Skill Gap Analysis</h1>
           <p>
             Detailed requirement comparison for <strong>{job.job_title}</strong> at <strong>{job.company}</strong>.
@@ -1989,7 +2232,7 @@ function ApplicationStudioPage({
   return (
     <div className="page">
       <PageIntro
-        kicker="MILESTONE 4.1 · APPLICATION MANAGEMENT MODULE"
+        kicker="APPLICATION TRACKER"
         title="Application Tracker & Studio"
         description="Track internship and job applications through their complete lifecycle, monitor deadlines, and customize tailored application materials."
       />
@@ -2833,7 +3076,7 @@ function InterviewPrepPage({
   return (
     <div className="page">
       <PageIntro
-        kicker="MILESTONE 3.3 · INTERVIEW AGENT"
+        kicker="INTERVIEW PREPARATION"
         title="Interview Mastery & Interactive Mock Lab"
         description={`Prepare for ${job.job_title} at ${job.company} across technical, architectural, project, and behavioral rubrics.`}
       />
@@ -3234,7 +3477,7 @@ function CareerAssistantPage({
   return (
     <div className="page copilot-page">
       <PageIntro
-        kicker="MILESTONE 3.4 · CONVERSATIONAL COPILOT"
+        kicker="AI CAREER ASSISTANT"
         title="Career Copilot"
         description="Your intelligent, context-aware career advisor with full access to your profile, target job, skill gaps, and interview prep."
       />
@@ -3355,29 +3598,41 @@ function SettingsPage({ profile, profileId, apiKeyConfigured }) {
   return (
     <div className="page narrow-page">
       <PageIntro
-        kicker="SETTINGS & CONFIGURATION"
-        title="Application Settings"
-        description="Configure backend integration, API keys, and environment variables."
+        kicker="PREFERENCES"
+        title="Settings"
+        description="Manage your career profile and application preferences."
       />
 
       <div className="panel settings-panel">
-        <h3>Backend Integration</h3>
+        <h3>Account Overview</h3>
+
         <div className="settings-row">
-          <span>API Base URL:</span>
-          <code>{API_BASE}</code>
+          <span>Profile</span>
+          <span className="badge success">
+            {profile ? "Profile Available" : "Not Set Up"}
+          </span>
         </div>
+
         <div className="settings-row">
-          <span>Gemini LLM Integration:</span>
-          <span className="badge success">Active & Connected</span>
+          <span>Career Preferences</span>
+          <span>Personalized career support</span>
         </div>
+
         <div className="settings-row">
-          <span>FAISS Vector Database:</span>
-          <span className="badge success">388 Vectors Indexed</span>
+          <span>AI Assistance</span>
+          <span className="badge success">
+            {apiKeyConfigured ? "Configured" : "Availability Depends on Setup"}
+          </span>
         </div>
-        <div className="settings-row">
-          <span>Current Active Profile ID:</span>
-          <code>{profileId ? `#${profileId}` : "Not Set"}</code>
-        </div>
+      </div>
+
+      <div className="panel settings-panel">
+        <h3>About AI Career Companion</h3>
+        <p>
+          Your personal career workspace for discovering opportunities,
+          identifying skill gaps, preparing for interviews, and managing
+          job applications.
+        </p>
       </div>
     </div>
   );
