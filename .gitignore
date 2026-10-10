@@ -1,0 +1,22 @@
+﻿
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Local databases and uploaded resumes
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/uploads/
+
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
