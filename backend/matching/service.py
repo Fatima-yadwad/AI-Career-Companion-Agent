@@ -13,8 +13,6 @@ class MatchingService:
         candidate: Dict[str, Any],
         top_k: int = 5
     ):
-
-
         query_parts = []
 
         if candidate.get("summary"):
@@ -31,11 +29,9 @@ class MatchingService:
             query_parts.append("Target role: " + target_role)
 
         query = " ".join(query_parts)
-
         if self.retriever is None:
             from backend.rag.retriever import JobRetriever
             self.retriever = JobRetriever()
-
         retrieved = self.retriever.search(
             query,
             top_k=min(max(top_k * 3, 5), 20)
