@@ -32,7 +32,7 @@ if str(PROJECT_ROOT) not in sys.path:
 # RAG + MATCHING + M3 AGENT IMPORTS
 # ============================================================
 
-from backend.rag.retriever import JobRetriever
+
 from backend.matching.service import MatchingService
 from backend.matching.job_loader import get_jobs_by_id, load_all_jobs
 from backend.agents.skill_gap_agent import skill_gap_agent
@@ -104,21 +104,18 @@ app = FastAPI(
 # CORS
 # ============================================================
 
-
-# ============================================================
-# CORS
-# ============================================================
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "").split(",")
+    if origin.strip()
+]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-        *[
-            origin.strip()
-            for origin in os.getenv("CORS_ORIGINS", "").split(",")
-            if origin.strip()
-        ],
+        *CORS_ORIGINS,
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -876,10 +873,14 @@ def get_profile_by_id(profile_id: int, request: Request):
 # STARTUP
 # ============================================================
 
+
+# ============================================================
+# STARTUP INITIALIZATION
+# ============================================================
+
 @app.on_event("startup")
 def initialize_services():
 
-    global job_retriever
     global matching_service
 
     print("\n" + "=" * 60)
@@ -887,55 +888,33 @@ def initialize_services():
     print("=" * 60)
 
     # --------------------------------------------------------
-    # Database
-    # --------------------------------------------------------
-
-    create_database()
-
-    print("\nDatabase initialized successfully.")
-
-    # --------------------------------------------------------
-    # RAG Retriever
+    # DATABASE INITIALIZATION
     # --------------------------------------------------------
 
     try:
-
-        print("\nLoading RAG job retriever...")
-
-        job_retriever = JobRetriever()
-
-        print(
-            "RAG retriever initialized successfully."
-        )
+        create_database()
+        print("\nDatabase initialized successfully.")
 
     except Exception as error:
-
-        job_retriever = None
-
-        print(
-            f"WARNING: RAG retriever could not be initialized: {error}"
-        )
-
-        print(
-            "Semantic job search will be unavailable."
-        )
+        print(f"\nERROR: Database initialization failed: {error}")
+        raise
 
     # --------------------------------------------------------
-    # Matching Service
+    # MATCHING SERVICE INITIALIZATION
+    # --------------------------------------------------------
+    # Do not load JobRetriever or SentenceTransformer here.
+    # The RAG model will be loaded when matching is requested.
     # --------------------------------------------------------
 
     try:
+        print("\nInitializing Job-Resume Matching Service...")
 
-        print("\nLoading Job-Resume Matching Service...")
+        matching_service = MatchingService()
 
-        matching_service = MatchingService(job_retriever)
-
-        print(
-            "Job-Resume Matching Service initialized successfully."
-        )
+        print("Job-Resume Matching Service initialized successfully.")
+        print("RAG model loading is deferred until needed.")
 
     except Exception as error:
-
         matching_service = None
 
         print(
@@ -943,7 +922,7 @@ def initialize_services():
         )
 
         print(
-            "Job matching will be unavailable."
+            "Job matching will be unavailable until the service is fixed."
         )
 
     print("\nBackend initialization complete.")
@@ -959,8 +938,9 @@ def health_check():
 
     return {
         "status": "ok",
-        "rag_available": job_retriever is not None,
-        "matching_available": matching_service is not None
+        "rag_available": False,
+        "matching_available": matching_service is not None,
+        "rag_loading": "deferred"
     }
 
 
@@ -1977,7 +1957,6 @@ def get_latest_resume(profile_id: int, request: Request):
 
     return result
 
-
 # ============================================================
 # JOB SEARCH
 # ============================================================
@@ -1985,32 +1964,48 @@ def get_latest_resume(profile_id: int, request: Request):
 @app.post("/jobs/search")
 def search_jobs(request: JobSearchInput):
 
-    if job_retriever is None:
-
-        raise HTTPException(
-            status_code=503,
-            detail="RAG job retriever is unavailable."
-        )
+    global job_retriever
 
     if request.top_k < 1:
-
         raise HTTPException(
             status_code=400,
             detail="top_k must be at least 1."
         )
 
-    try:
+    # Load the RAG retriever only when job search is requested.
+    if job_retriever is None:
+        try:
+            print("\nInitializing RAG job retriever...")
 
+            from backend.rag.retriever import JobRetriever
+
+            job_retriever = JobRetriever()
+
+            print("RAG job retriever initialized successfully.")
+
+        except Exception as error:
+            print(f"WARNING: RAG initialization failed: {error}")
+
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Semantic job search is currently unavailable. "
+                    "The RAG retriever could not be initialized."
+                )
+            )
+
+    try:
         results = job_retriever.search(
             request.query,
             top_k=request.top_k
         )
 
     except Exception as error:
+        print(f"ERROR: Job search failed: {error}")
 
         raise HTTPException(
             status_code=500,
-            detail=f"Job search failed: {error}"
+            detail="Job search failed. Please try again later."
         )
 
     return {

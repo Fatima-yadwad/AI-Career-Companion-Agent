@@ -1,6 +1,4 @@
-from typing import Dict, Any
-
-from backend.rag.retriever import JobRetriever
+﻿from typing import Dict, Any
 from backend.matching.job_loader import get_jobs_by_id
 from backend.matching.matcher import calculate_job_match
 
@@ -8,7 +6,7 @@ from backend.matching.matcher import calculate_job_match
 class MatchingService:
 
     def __init__(self, retriever=None):
-        self.retriever = retriever or JobRetriever()
+        self.retriever = retriever
 
     def match_candidate(
         self,
@@ -16,31 +14,27 @@ class MatchingService:
         top_k: int = 5
     ):
 
+
         query_parts = []
 
         if candidate.get("summary"):
-            query_parts.append(
-                candidate["summary"]
-            )
+            query_parts.append(candidate["summary"])
 
         skills = candidate.get("skills", [])
 
         if skills:
-            query_parts.append(
-                "Skills: " + ", ".join(skills)
-            )
+            query_parts.append("Skills: " + ", ".join(skills))
 
-        target_role = candidate.get(
-            "target_role",
-            ""
-        )
+        target_role = candidate.get("target_role", "")
 
         if target_role:
-            query_parts.append(
-                "Target role: " + target_role
-            )
+            query_parts.append("Target role: " + target_role)
 
         query = " ".join(query_parts)
+
+        if self.retriever is None:
+            from backend.rag.retriever import JobRetriever
+            self.retriever = JobRetriever()
 
         retrieved = self.retriever.search(
             query,
