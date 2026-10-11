@@ -1,8 +1,16 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import Auth from "./Auth";
 const API_BASE =
   import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
+const EMPTY_PROFILE = {
+  full_name: "",
+  email: "",
+  phone: "",
+  location: "",
+  target_role: "",
+  linkedin_url: "",
+};
 const APPLICATION_STATUSES = [
   { value: "Saved", label: "Saved", badgeClass: "badge-gray", icon: "🔖" },
   { value: "Planning to apply", label: "Planning to apply", badgeClass: "badge-blue", icon: "📝" },
@@ -38,15 +46,10 @@ function App() {
   const [profileId, setProfileId] = useState(
     localStorage.getItem("career_profile_id") || ""
   );
-
-  const [profile, setProfile] = useState({
-    full_name: "",
-    email: "",
-    phone: "",
-    location: "",
-    target_role: "",
-    linkedin_url: "",
-  });
+  const [profile, setProfile] = useState({ ...EMPTY_PROFILE });
+  const [profileLoading, setProfileLoading] = useState(true);
+  const profileLoadVersion = useRef(0);
+  const authSessionVersion = useRef(0);
 
   const [resume, setResume] = useState(null);
   const [jobs, setJobs] = useState([]);
@@ -102,6 +105,7 @@ function App() {
         if (cancelled) return;
 
         setAuthUser(data.user);
+        setProfile(data.profile || { ...EMPTY_PROFILE });
 
         const id =
           data.profile?.profile_id ??
@@ -114,14 +118,11 @@ function App() {
         } else {
           localStorage.removeItem("career_profile_id");
           setProfileId("");
+          setProfileLoading(false);
         }
       } catch {
         if (!cancelled) {
-          localStorage.removeItem("career_auth_token");
-          localStorage.removeItem("career_auth_user");
-          localStorage.removeItem("career_profile_id");
-          setAuthUser(null);
-          setProfileId("");
+          clearAuthenticatedState();
         }
       } finally {
         if (!cancelled) {
@@ -138,7 +139,17 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (authChecking || !authUser || !profileId) return;
+    if (authChecking || !authUser) return;
+
+    const loadVersion = ++profileLoadVersion.current;
+    const isCurrentLoad = () =>
+      profileLoadVersion.current === loadVersion;
+
+    if (!profileId) {
+      return () => {
+        if (isCurrentLoad()) profileLoadVersion.current += 1;
+      };
+    }
 
     const storageKey = `career_chat_session_${profileId}`;
     const savedSessionId = localStorage.getItem(storageKey);
@@ -147,7 +158,14 @@ function App() {
 
     localStorage.setItem(storageKey, nextSessionId);
     setChatSessionId(nextSessionId);
-    loadProfileData();
+
+    loadProfileData(profileId, isCurrentLoad).finally(() => {
+      if (isCurrentLoad()) setProfileLoading(false);
+    });
+
+    return () => {
+      if (isCurrentLoad()) profileLoadVersion.current += 1;
+    };
   }, [profileId, authChecking, authUser]);
 
   useEffect(() => {
@@ -163,8 +181,11 @@ function App() {
     const historyUrl =
       `/career-assistant/history/${profileId}?conversation_id=${encodeURIComponent(chatSessionId)}`;
 
+    let cancelled = false;
+
     apiRequest(historyUrl)
       .then((historyData) => {
+        if (cancelled) return;
         const sessionMessages = (historyData?.messages || []).map(
           (item) => ({
             role: item.role,
@@ -176,9 +197,44 @@ function App() {
         setChatMessages(sessionMessages);
       })
       .catch(() => {
-        setChatMessages([]);
+        if (!cancelled) setChatMessages([]);
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [profileId, chatSessionId, authChecking, authUser]);
+
+  function clearAuthenticatedState() {
+    authSessionVersion.current += 1;
+    profileLoadVersion.current += 1;
+    localStorage.removeItem("career_auth_token");
+    localStorage.removeItem("career_auth_user");
+    localStorage.removeItem("career_profile_id");
+
+    setAuthUser(null);
+    setAuthChecking(false);
+    setProfileId("");
+    setProfile({ ...EMPTY_PROFILE });
+    setProfileLoading(false);
+    setResume(null);
+    setJobs([]);
+    setSelectedJob(null);
+    setSkillGap(null);
+    setTailoredResume(null);
+    setCoverLetter(null);
+    setInterviewPrep(null);
+    setMockSession(null);
+    setChatMessages([]);
+    setChatSessionId("");
+    setApplications([]);
+    setAppDashboard(null);
+    setAppLoading(false);
+    setLoading(false);
+    setActivePage("dashboard");
+    setError("");
+    setMessage("");
+  }
 
   async function apiRequest(endpoint, options = {}) {
     const timeoutMs = Number(options.timeoutMs ?? 25000);
@@ -186,6 +242,7 @@ function App() {
     const signal = options.signal || controller.signal;
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const token = localStorage.getItem("career_auth_token");
+    const requestSessionVersion = authSessionVersion.current;
 
     try {
       const response = await fetch(`${API_BASE}${endpoint}`, {
@@ -207,12 +264,30 @@ function App() {
         data = null;
       }
 
+      if (
+        requestSessionVersion !== authSessionVersion.current ||
+        localStorage.getItem("career_auth_token") !== token
+      ) {
+        const error = new Error("The authentication session changed.");
+        error.name = "StaleSessionError";
+        throw error;
+      }
+
       if (!response.ok) {
-        throw new Error(
+        if (
+          response.status === 401 &&
+          localStorage.getItem("career_auth_token") === token
+        ) {
+          clearAuthenticatedState();
+        }
+
+        const error = new Error(
           data?.detail ||
           data?.message ||
           `Request failed (${response.status})`
         );
+        error.status = response.status;
+        throw error;
       }
 
       return data;
@@ -227,19 +302,44 @@ function App() {
     }
   }
 
-  async function loadProfileData() {
+  async function loadProfileData(
+    profileIdToLoad = profileId,
+    isCurrent = () => true
+  ) {
+    if (!profileIdToLoad) {
+      if (isCurrent()) setProfile({ ...EMPTY_PROFILE });
+      return;
+    }
+
+    try {
+      const savedProfile = await apiRequest(
+        `/profiles/${profileIdToLoad}`
+      );
+      if (isCurrent()) setProfile(savedProfile);
+    } catch (err) {
+      if (isCurrent()) {
+        setError(`Could not load your profile: ${err.message}`);
+      }
+      return;
+    }
+
     try {
       const latestResume = await apiRequest(
-        `/profiles/${profileId}/resumes/latest`
+        `/profiles/${profileIdToLoad}/resumes/latest`
       );
-      setResume(latestResume);
-    } catch {
-      setResume(null);
+      if (isCurrent()) setResume(latestResume);
+    } catch (err) {
+      if (isCurrent()) {
+        setResume(null);
+        if (err.status !== 404) {
+          console.error("Could not load the latest resume:", err);
+        }
+      }
     }
 
     try {
       const matches = await apiRequest(
-        `/profiles/${profileId}/job-matches`,
+        `/profiles/${profileIdToLoad}/job-matches`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -248,19 +348,26 @@ function App() {
       );
 
       const fetchedJobs = matches.results || [];
+      if (!isCurrent()) return;
       setJobs(fetchedJobs);
 
-      if (fetchedJobs.length > 0 && !selectedJob) {
-        setSelectedJob(fetchedJobs[0]);
+      setSelectedJob(fetchedJobs[0] || null);
+    } catch (err) {
+      if (isCurrent()) {
+        setJobs([]);
+        console.error("Could not load job matches:", err);
       }
-    } catch {
-      setJobs([]);
     }
 
-    loadApplicationsData(profileId);
+    if (isCurrent()) {
+      await loadApplicationsData(profileIdToLoad, isCurrent);
+    }
   }
 
-  async function loadApplicationsData(profId = profileId) {
+  async function loadApplicationsData(
+    profId = profileId,
+    isCurrent = () => true
+  ) {
     if (!profId) return;
 
     setAppLoading(true);
@@ -269,16 +376,19 @@ function App() {
       const listData = await apiRequest(
         `/profiles/${profId}/applications`
       );
+      if (!isCurrent()) return;
       setApplications(listData?.applications || []);
 
       const dashData = await apiRequest(
         `/profiles/${profId}/applications/dashboard`
       );
-      setAppDashboard(dashData || null);
+      if (isCurrent()) setAppDashboard(dashData || null);
     } catch (err) {
-      console.error("Could not load applications:", err);
+      if (isCurrent()) {
+        console.error("Could not load applications:", err);
+      }
     } finally {
-      setAppLoading(false);
+      if (isCurrent()) setAppLoading(false);
     }
   }
 
@@ -437,8 +547,10 @@ function App() {
 
       const newId = String(data.id);
 
+      setProfile(data);
       setProfileId(newId);
       localStorage.setItem("career_profile_id", newId);
+      setProfileLoading(false);
       setMessage("Profile saved successfully.");
       setActivePage("resume");
     } catch (err) {
@@ -551,6 +663,7 @@ function App() {
 
   function handleAuthSuccess(data) {
     setAuthUser(data.user);
+    setProfile(data.profile || { ...EMPTY_PROFILE });
 
     const id =
       data.profile?.profile_id ??
@@ -561,59 +674,39 @@ function App() {
       const nextId = String(id);
       localStorage.setItem("career_profile_id", nextId);
       setProfileId(nextId);
+      setProfileLoading(true);
     } else {
       localStorage.removeItem("career_profile_id");
       setProfileId("");
+      setProfileLoading(false);
     }
 
     setError("");
     setMessage("");
   }
 
-  function handleLogout() {
+  async function handleLogout() {
     const token = localStorage.getItem("career_auth_token");
+    clearAuthenticatedState();
 
     if (token) {
-      fetch(`${API_BASE}/auth/logout`, {
+      await fetch(`${API_BASE}/auth/logout`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
         },
-      }).catch(() => {});
+      }).then((response) => {
+        if (!response.ok) {
+          console.error(
+            "Could not confirm server-side logout; local authentication state was cleared."
+          );
+        }
+      }).catch(() => {
+        console.error(
+          "Could not confirm server-side logout; local authentication state was cleared."
+        );
+      });
     }
-
-    localStorage.removeItem("career_auth_token");
-    localStorage.removeItem("career_auth_user");
-    localStorage.removeItem("career_profile_id");
-
-    setAuthUser(null);
-    setAuthChecking(false);
-    setProfileId("");
-
-    setProfile({
-      full_name: "",
-      email: "",
-      phone: "",
-      location: "",
-      target_role: "",
-      linkedin_url: "",
-    });
-
-    setResume(null);
-    setJobs([]);
-    setSelectedJob(null);
-    setSkillGap(null);
-    setTailoredResume(null);
-    setCoverLetter(null);
-    setInterviewPrep(null);
-    setMockSession(null);
-    setChatMessages([]);
-    setChatSessionId("");
-    setApplications([]);
-    setAppDashboard(null);
-    setActivePage("dashboard");
-    setError("");
-    setMessage("");
   }
 
   // ============================================================
@@ -889,9 +982,18 @@ function App() {
     );
   }
 
-  // Show Login / Sign Up when the user is not authenticated.
   if (!authUser) {
     return <Auth onAuthSuccess={handleAuthSuccess} />;
+  }
+
+  if (profileLoading) {
+    return (
+      <div className="auth-page">
+        <div className="auth-form-section">
+          <p>Loading your profile...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -951,6 +1053,14 @@ function App() {
               <span>{profile?.target_role || "AI Career Explorer"}</span>
             </div>
           </div>
+          <button
+            className="logout-button"
+            type="button"
+            onClick={handleLogout}
+          >
+            <span aria-hidden="true">↪</span>
+            <span>Log out</span>
+          </button>
         </div>
       </aside>
 

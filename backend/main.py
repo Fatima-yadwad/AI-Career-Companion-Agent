@@ -516,7 +516,7 @@ def ensure_user_profile(user_id: int, full_name: str, email: str):
 
     if profile is None:
         profile = connection.execute(
-            "SELECT * FROM profiles WHERE email = ? ORDER BY id DESC LIMIT 1",
+            "SELECT * FROM profiles WHERE email = ? AND user_id IS NULL ORDER BY id DESC LIMIT 1",
             (email,)
         ).fetchone()
 
@@ -546,7 +546,7 @@ def ensure_user_profile(user_id: int, full_name: str, email: str):
 
 def assert_profile_access(profile_id: int, current_user: dict | None):
     if current_user is None:
-        return
+        raise HTTPException(status_code=401, detail="Authentication required.")
 
     connection = get_connection()
     profile = connection.execute("SELECT * FROM profiles WHERE id = ?", (profile_id,)).fetchone()
@@ -554,18 +554,6 @@ def assert_profile_access(profile_id: int, current_user: dict | None):
     if not profile:
         connection.close()
         raise HTTPException(status_code=404, detail="Profile not found.")
-
-    if profile["user_id"] is None:
-        if profile["email"] == current_user["email"]:
-            connection.execute(
-                "UPDATE profiles SET user_id = ?, updated_at = ? WHERE id = ?",
-                (current_user["id"], datetime.now(timezone.utc).isoformat(), profile_id)
-            )
-            connection.commit()
-            connection.close()
-            return
-        connection.close()
-        raise HTTPException(status_code=403, detail="You do not have permission to access this profile.")
 
     if profile["user_id"] != current_user["id"]:
         connection.close()
@@ -644,21 +632,19 @@ def login_user(request: AuthLoginInput):
 def logout_user(request: Request):
     current_user = get_current_user(request)
     auth_header = request.headers.get("Authorization", "")
-    token = auth_header.split(" ", 1)[1].strip() if auth_header.startswith("Bearer ") else ""
-    if token:
+    token = auth_header.split(" ", 1)[1].strip()
+    payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+    jti = payload.get("jti")
+    if jti:
+        connection = get_connection()
         try:
-            payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
-            jti = payload.get("jti")
-            if jti:
-                connection = get_connection()
-                connection.execute(
-                    "UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND token_jti = ? AND revoked_at IS NULL",
-                    (datetime.now(timezone.utc).isoformat(), current_user["id"], jti)
-                )
-                connection.commit()
-                connection.close()
-        except Exception:
-            pass
+            connection.execute(
+                "UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND token_jti = ? AND revoked_at IS NULL",
+                (datetime.now(timezone.utc).isoformat(), current_user["id"], jti)
+            )
+            connection.commit()
+        finally:
+            connection.close()
     return {"message": "Logged out successfully."}
 
 
@@ -685,7 +671,7 @@ def update_current_profile(request: Request, payload: AuthProfileInput):
 
     if profile is None:
         profile = connection.execute(
-            "SELECT * FROM profiles WHERE email = ? ORDER BY id DESC LIMIT 1",
+            "SELECT * FROM profiles WHERE email = ? AND user_id IS NULL ORDER BY id DESC LIMIT 1",
             (current_user["email"],)
         ).fetchone()
 
@@ -735,9 +721,8 @@ def update_current_profile(request: Request, payload: AuthProfileInput):
 
 @app.get("/profiles/{profile_id}")
 def get_profile_by_id(profile_id: int, request: Request):
-    current_user = get_optional_current_user(request)
-    if current_user is not None:
-        assert_profile_access(profile_id, current_user)
+    current_user = get_current_user(request)
+    assert_profile_access(profile_id, current_user)
 
     connection = get_connection()
     profile = connection.execute("SELECT * FROM profiles WHERE id = ?", (profile_id,)).fetchone()
@@ -828,46 +813,73 @@ def health_check():
 
 @app.post("/profiles")
 def create_profile(profile: ProfileInput, request: Request):
-    current_user = None
-    try:
-        current_user = get_optional_current_user(request)
-    except HTTPException:
-        current_user = None
-
+    current_user = get_current_user(request)
     connection = get_connection()
-    existing = connection.execute(
-        """
-        SELECT *
-        FROM profiles
-        WHERE email = ?
-        """,
-        (
-            str(profile.email).lower(),
-        )
-    ).fetchone()
-
-    if current_user is not None:
-        if existing and existing["user_id"] not in (None, current_user["id"]):
-            connection.close()
-            raise HTTPException(status_code=403, detail="You do not have permission to access this profile.")
-        if existing and existing["user_id"] is None:
-            connection.execute(
-                "UPDATE profiles SET user_id = ?, full_name = ?, updated_at = ? WHERE id = ?",
-                (current_user["id"], profile.full_name, datetime.now(timezone.utc).isoformat(), existing["id"])
-            )
-            connection.commit()
-            profile_row = connection.execute("SELECT * FROM profiles WHERE id = ?", (existing["id"],)).fetchone()
-            connection.close()
-            return dict(profile_row)
-
-    if existing:
-        connection.close()
-        return dict(existing)
-
-    now = datetime.now(timezone.utc).isoformat()
-
     try:
-        if current_user is not None:
+        existing = connection.execute(
+            """
+            SELECT *
+            FROM profiles
+            WHERE user_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (current_user["id"],)
+        ).fetchone()
+
+        if existing is None:
+            existing = connection.execute(
+                """
+                SELECT *
+                FROM profiles
+                WHERE LOWER(email) = ? AND user_id IS NULL
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (current_user["email"].lower(),)
+            ).fetchone()
+
+        now = datetime.now(timezone.utc).isoformat()
+        email = str(profile.email).lower()
+        if existing is None:
+            email_conflict = connection.execute(
+                "SELECT id FROM profiles WHERE LOWER(email) = ? LIMIT 1",
+                (email,)
+            ).fetchone()
+        else:
+            email_conflict = connection.execute(
+                "SELECT id FROM profiles WHERE LOWER(email) = ? AND id <> ? LIMIT 1",
+                (email, existing["id"])
+            ).fetchone()
+
+        if email_conflict:
+            raise HTTPException(
+                status_code=409,
+                detail="This email address is already associated with another profile."
+            )
+
+        if existing is not None:
+            connection.execute(
+                """
+                UPDATE profiles
+                SET user_id = ?, full_name = ?, email = ?, phone = ?, location = ?,
+                    target_role = ?, linkedin_url = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    current_user["id"],
+                    profile.full_name,
+                    email,
+                    profile.phone,
+                    profile.location,
+                    profile.target_role,
+                    profile.linkedin_url,
+                    now,
+                    existing["id"],
+                )
+            )
+            profile_id = existing["id"]
+        else:
             cursor = connection.execute(
                 """
                 INSERT INTO profiles
@@ -887,34 +899,7 @@ def create_profile(profile: ProfileInput, request: Request):
                 (
                     current_user["id"],
                     profile.full_name,
-                    str(profile.email).lower(),
-                    profile.phone,
-                    profile.location,
-                    profile.target_role,
-                    profile.linkedin_url,
-                    now,
-                    now,
-                )
-            )
-        else:
-            cursor = connection.execute(
-                """
-                INSERT INTO profiles
-                (
-                    full_name,
                     email,
-                    phone,
-                    location,
-                    target_role,
-                    linkedin_url,
-                    created_at,
-                    updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    profile.full_name,
-                    str(profile.email).lower(),
                     profile.phone,
                     profile.location,
                     profile.target_role,
@@ -923,19 +908,17 @@ def create_profile(profile: ProfileInput, request: Request):
                     now,
                 )
             )
+            profile_id = cursor.lastrowid
 
         connection.commit()
 
         saved_profile = connection.execute(
-            """
-            SELECT *
-            FROM profiles
-            WHERE id = ?
-            """,
-            (
-                cursor.lastrowid,
-            )
+            "SELECT * FROM profiles WHERE id = ? AND user_id = ?",
+            (profile_id, current_user["id"])
         ).fetchone()
+
+        if saved_profile is None:
+            raise HTTPException(status_code=404, detail="Profile could not be saved.")
 
         return dict(saved_profile)
 
@@ -1566,9 +1549,8 @@ async def upload_resume(
     request: Request,
     file: UploadFile = File(...)
 ):
-    current_user = get_optional_current_user(request)
-    if current_user is not None:
-        assert_profile_access(profile_id, current_user)
+    current_user = get_current_user(request)
+    assert_profile_access(profile_id, current_user)
 
     # --------------------------------------------------------
     # Validate profile
@@ -1788,9 +1770,8 @@ async def upload_resume(
 
 @app.get("/profiles/{profile_id}/resumes/latest")
 def get_latest_resume(profile_id: int, request: Request):
-    current_user = get_optional_current_user(request)
-    if current_user is not None:
-        assert_profile_access(profile_id, current_user)
+    current_user = get_current_user(request)
+    assert_profile_access(profile_id, current_user)
 
     connection = get_connection()
 
@@ -1902,9 +1883,8 @@ def get_job_matches(
     request: JobMatchInput,
     auth_request: Request
 ):
-    current_user = get_optional_current_user(auth_request)
-    if current_user is not None:
-        assert_profile_access(profile_id, current_user)
+    current_user = get_current_user(auth_request)
+    assert_profile_access(profile_id, current_user)
 
     if matching_service is None:
 
@@ -2219,7 +2199,7 @@ def analyze_skill_gap(
     request: SkillGapInput,
     auth_request: Request
 ):
-    current_user = get_optional_current_user(auth_request)
+    current_user = get_current_user(auth_request)
     candidate, job = resolve_candidate_and_job(
         profile_id=profile_id,
         job_id=request.job_id,
@@ -2267,7 +2247,7 @@ def customize_resume(
     request: ResumeCustomizationInput,
     auth_request: Request
 ):
-    current_user = get_optional_current_user(auth_request)
+    current_user = get_current_user(auth_request)
     candidate, job = resolve_candidate_and_job(
         profile_id=profile_id,
         job_id=request.job_id,
@@ -2314,7 +2294,7 @@ def generate_cover_letter(
     request: CoverLetterInput,
     auth_request: Request
 ):
-    current_user = get_optional_current_user(auth_request)
+    current_user = get_current_user(auth_request)
     candidate, job = resolve_candidate_and_job(
         profile_id=profile_id,
         job_id=request.job_id,
@@ -2361,7 +2341,7 @@ def generate_interview_prep(
     request: InterviewPrepInput,
     auth_request: Request
 ):
-    current_user = get_optional_current_user(auth_request)
+    current_user = get_current_user(auth_request)
     candidate, job = resolve_candidate_and_job(
         profile_id=profile_id,
         job_id=request.job_id,
@@ -2432,7 +2412,7 @@ def start_mock_interview(
     request: MockInterviewStartInput,
     auth_request: Request
 ):
-    current_user = get_optional_current_user(auth_request)
+    current_user = get_current_user(auth_request)
     candidate, job = resolve_candidate_and_job(
         profile_id=profile_id,
         job_id=request.job_id,
@@ -2516,9 +2496,8 @@ def submit_mock_interview_answer(
     request: MockInterviewAnswerInput,
     auth_request: Request
 ):
-    current_user = get_optional_current_user(auth_request)
-    if current_user is not None:
-        assert_profile_access(profile_id, current_user)
+    current_user = get_current_user(auth_request)
+    assert_profile_access(profile_id, current_user)
     connection = get_connection()
     session = connection.execute(
         """
@@ -2620,9 +2599,8 @@ def get_mock_interview_details(
     interview_id: int,
     request: Request
 ):
-    current_user = get_optional_current_user(request)
-    if current_user is not None:
-        assert_profile_access(profile_id, current_user)
+    current_user = get_current_user(request)
+    assert_profile_access(profile_id, current_user)
     connection = get_connection()
     session = connection.execute(
         """
@@ -2728,9 +2706,8 @@ def create_application(
     request: ApplicationCreateInput,
     auth_request: Request
 ):
-    current_user = get_optional_current_user(auth_request)
-    if current_user is not None:
-        assert_profile_access(profile_id, current_user)
+    current_user = get_current_user(auth_request)
+    assert_profile_access(profile_id, current_user)
 
     connection = get_connection()
     try:
@@ -2809,9 +2786,8 @@ def get_applications(
     deadline_filter: str | None = None,
     application_date: str | None = None
 ):
-    current_user = get_optional_current_user(auth_request)
-    if current_user is not None:
-        assert_profile_access(profile_id, current_user)
+    current_user = get_current_user(auth_request)
+    assert_profile_access(profile_id, current_user)
 
     connection = get_connection()
     try:
@@ -2869,9 +2845,8 @@ def get_application_dashboard(
     profile_id: int,
     auth_request: Request
 ):
-    current_user = get_optional_current_user(auth_request)
-    if current_user is not None:
-        assert_profile_access(profile_id, current_user)
+    current_user = get_current_user(auth_request)
+    assert_profile_access(profile_id, current_user)
 
     connection = get_connection()
     try:
@@ -2951,9 +2926,8 @@ def get_application_by_id(
     application_id: int,
     auth_request: Request
 ):
-    current_user = get_optional_current_user(auth_request)
-    if current_user is not None:
-        assert_profile_access(profile_id, current_user)
+    current_user = get_current_user(auth_request)
+    assert_profile_access(profile_id, current_user)
 
     connection = get_connection()
     try:
@@ -2977,9 +2951,8 @@ def update_application(
     request: ApplicationUpdateInput,
     auth_request: Request
 ):
-    current_user = get_optional_current_user(auth_request)
-    if current_user is not None:
-        assert_profile_access(profile_id, current_user)
+    current_user = get_current_user(auth_request)
+    assert_profile_access(profile_id, current_user)
 
     connection = get_connection()
     try:
@@ -3033,9 +3006,8 @@ def delete_application(
     application_id: int,
     auth_request: Request
 ):
-    current_user = get_optional_current_user(auth_request)
-    if current_user is not None:
-        assert_profile_access(profile_id, current_user)
+    current_user = get_current_user(auth_request)
+    assert_profile_access(profile_id, current_user)
 
     connection = get_connection()
     try:
@@ -3063,8 +3035,8 @@ def delete_application(
 
 @app.post("/career-assistant/chat")
 def chat_career_assistant(request: CareerAssistantInput, auth_request: Request):
-    current_user = get_optional_current_user(auth_request)
-    if request.profile_id and current_user is not None:
+    current_user = get_current_user(auth_request)
+    if request.profile_id:
         assert_profile_access(request.profile_id, current_user)
 
     profile = {}
@@ -3162,9 +3134,8 @@ def chat_career_assistant(request: CareerAssistantInput, auth_request: Request):
 
 @app.get("/career-assistant/history/{profile_id}")
 def get_chat_history(profile_id: int, request: Request, conversation_id: str | None = None):
-    current_user = get_optional_current_user(request)
-    if current_user is not None:
-        assert_profile_access(profile_id, current_user)
+    current_user = get_current_user(request)
+    assert_profile_access(profile_id, current_user)
     connection = get_connection()
     if conversation_id:
         messages = connection.execute(
