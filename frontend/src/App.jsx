@@ -29,7 +29,7 @@ const NAV_ITEMS = [
 ];
 
 function App() {
-  
+
   const [authUser, setAuthUser] = useState(null);
   const [authChecking, setAuthChecking] = useState(true);
 
@@ -71,8 +71,7 @@ function App() {
   const [applications, setApplications] = useState([]);
   const [appDashboard, setAppDashboard] = useState(null);
   const [appLoading, setAppLoading] = useState(false);
-  
- 
+
   useEffect(() => {
     let cancelled = false;
 
@@ -549,7 +548,7 @@ function App() {
       setLoading(false);
     }
   }
-  
+
   function handleAuthSuccess(data) {
     setAuthUser(data.user);
 
@@ -874,7 +873,7 @@ function App() {
     .join("")
     .toUpperCase();
 
-  
+
   const skills = useMemo(() => {
     return resume?.extracted_profile?.skills || [];
   }, [resume]);
@@ -3375,14 +3374,20 @@ function renderMarkdownContent(content = "") {
   return (
     <div className="markdown-content">
       {blocks.map((block, index) => {
-        if (/^#{1,6}\s+/.test(block.trim())) {
-          const match = block.trim().match(/^(#{1,6})\s+(.*)$/);
-          const level = match[1].length;
-          const text = match[2];
-          const HeadingTag = `h${Math.min(level, 4)}`;
-          return <HeadingTag key={index}>{renderInlineMarkdown(text)}</HeadingTag>;
-        }
+         if (/^#{1,6}\s+/.test(block.trim())) {
+            const match = block.trim().match(/^(#{1,6})\s+(.*)$/);
+              if (match) {
+                const level = match[1].length;
+                const text = match[2];
+                const HeadingTag = `h${Math.min(level, 4)}`;
 
+               return (
+                <HeadingTag key={index}>
+                  {renderInlineMarkdown(text)}
+                </HeadingTag>
+             );
+           }
+         }
         if (/^(?:[-*]|\d+\.)\s+/.test(block.trim())) {
           const items = block
             .split(/\n/)

@@ -1,8 +1,7 @@
-import json
+﻿import json
 import os
 import re
 import shutil
-import sqlite3
 import sys
 import time
 import uuid
@@ -190,7 +189,7 @@ class MockInterviewAnswerInput(BaseModel):
 
 
 # ============================================================
-# M4.1 — APPLICATION TRACKING & MANAGEMENT MODELS
+# M4.1 â€” APPLICATION TRACKING & MANAGEMENT MODELS
 # ============================================================
 
 VALID_APPLICATION_STATUSES = [
@@ -250,242 +249,121 @@ class CareerAssistantInput(BaseModel):
 # DATABASE CONNECTION
 # ============================================================
 
+
+def _pg_sql(sql):
+    # Convert ? placeholders outside quoted SQL strings.
+    out, quote, i = [], None, 0
+    while i < len(sql):
+        c = sql[i]
+        if quote:
+            out.append(c)
+            if c == quote:
+                if i + 1 < len(sql) and sql[i + 1] == quote:
+                    out.append(sql[i + 1])
+                    i += 2
+                    continue
+                quote = None
+        elif c in ("'", '"'):
+            quote = c
+            out.append(c)
+        elif c == "?":
+            out.append("%s")
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
+class PGCursor:
+    def __init__(self, cursor):
+        self.c = cursor
+        self._insert_id = None
+        self._insert_id_read = False
+
+    @property
+    def lastrowid(self):
+        if not self._insert_id_read:
+            row = self.c.fetchone()
+            self._insert_id = row["id"] if row else None
+            self._insert_id_read = True
+        return self._insert_id
+
+    def fetchone(self):
+        return self.c.fetchone()
+
+    def fetchall(self):
+        return self.c.fetchall()
+
+    def __getattr__(self, name):
+        return getattr(self.c, name)
+
+class PostgresConnection:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def execute(self, sql, params=None):
+        sql = _pg_sql(sql)
+        if re.match(r"\s*INSERT\s+INTO\b", sql, re.I) and not re.search(r"\bRETURNING\b", sql, re.I):
+            sql = sql.rstrip().rstrip(";") + " RETURNING id"
+        cur = self.conn.cursor()
+        cur.execute(sql, params) if params is not None else cur.execute(sql)
+        return PGCursor(cur)
+
+    def commit(self):
+        self.conn.commit()
+
+    def rollback(self):
+        self.conn.rollback()
+
+    def close(self):
+        self.conn.close()
+
+
 def get_connection():
-    connection = sqlite3.connect(DATABASE)
-    connection.row_factory = sqlite3.Row
-    return connection
+    import psycopg
+    from psycopg.rows import dict_row
 
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        raise RuntimeError("DATABASE_URL is missing from backend/.env")
+    return PostgresConnection(psycopg.connect(url, row_factory=dict_row))
 
-# ============================================================
-# DATABASE INITIALIZATION
-# ============================================================
 
 def create_database():
+    # Tables already exist in Supabase; do not recreate or migrate them here.
+    conn = get_connection()
+    try:
+        required = (
+            "users", "profiles", "resumes", "skill_gaps",
+            "customized_resumes", "cover_letters", "interview_preps",
+            "mock_interviews", "mock_interview_answers", "chat_messages",
+            "auth_sessions", "applications",
+        )
+        for table in required:
+            found = conn.execute(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema='public' AND table_name=%s",
+                (table,),
+            ).fetchone()
+            if not found:
+                raise RuntimeError(f"Missing Supabase table: {table}")
 
-    connection = get_connection()
+        for sql in (
+            "CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)",
+            "CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_applications_profile ON applications(profile_id)",
+            "CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(profile_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_chat_messages_profile_conversation ON chat_messages(profile_id, conversation_id, created_at)",
+        ):
+            conn.execute(sql)
 
-    connection.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            full_name TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            is_active INTEGER NOT NULL DEFAULT 1
-        );
-
-        CREATE TABLE IF NOT EXISTS profiles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            full_name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            phone TEXT,
-            location TEXT,
-            target_role TEXT,
-            linkedin_url TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT,
-            FOREIGN KEY(user_id)
-                REFERENCES users(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS resumes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            profile_id INTEGER NOT NULL,
-            filename TEXT NOT NULL,
-            file_path TEXT NOT NULL,
-            file_type TEXT,
-            size_bytes INTEGER,
-            uploaded_at TEXT NOT NULL,
-            extraction_json TEXT,
-            extraction_method TEXT,
-            FOREIGN KEY(profile_id)
-                REFERENCES profiles(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS skill_gaps (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            profile_id INTEGER NOT NULL,
-            job_id TEXT NOT NULL,
-            result_json TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(profile_id)
-                REFERENCES profiles(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS customized_resumes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            profile_id INTEGER NOT NULL,
-            job_id TEXT NOT NULL,
-            resume_json TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(profile_id)
-                REFERENCES profiles(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS cover_letters (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            profile_id INTEGER NOT NULL,
-            job_id TEXT NOT NULL,
-            letter_json TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(profile_id)
-                REFERENCES profiles(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS interview_preps (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            profile_id INTEGER NOT NULL,
-            job_id TEXT NOT NULL,
-            prep_json TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(profile_id)
-                REFERENCES profiles(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS mock_interviews (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            profile_id INTEGER NOT NULL,
-            job_id TEXT NOT NULL,
-            job_title TEXT NOT NULL,
-            company TEXT NOT NULL,
-            status TEXT NOT NULL,
-            questions_json TEXT NOT NULL,
-            current_index INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(profile_id)
-                REFERENCES profiles(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS mock_interview_answers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            interview_id INTEGER NOT NULL,
-            question_index INTEGER NOT NULL,
-            question_text TEXT NOT NULL,
-            category TEXT NOT NULL,
-            user_answer TEXT NOT NULL,
-            evaluation_json TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(interview_id)
-                REFERENCES mock_interviews(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS chat_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            profile_id INTEGER NOT NULL,
-            job_id TEXT,
-            conversation_id TEXT,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            context_used_json TEXT,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(profile_id)
-                REFERENCES profiles(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS auth_sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            token_jti TEXT NOT NULL,
-            issued_at TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            revoked_at TEXT,
-            FOREIGN KEY(user_id)
-                REFERENCES users(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS applications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            profile_id INTEGER NOT NULL,
-            job_id TEXT,
-            company_name TEXT NOT NULL,
-            job_title TEXT NOT NULL,
-            job_description TEXT,
-            application_date TEXT NOT NULL,
-            deadline TEXT,
-            status TEXT NOT NULL DEFAULT 'Saved',
-            interview_date TEXT,
-            interview_status TEXT,
-            notes TEXT,
-            follow_up_date TEXT,
-            customized_resume TEXT,
-            cover_letter TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            FOREIGN KEY(profile_id)
-                REFERENCES profiles(id)
-        );
-        """
-    )
-
-    profile_columns = connection.execute("PRAGMA table_info(profiles)").fetchall()
-    if not any(column[1] == "user_id" for column in profile_columns):
-        connection.execute("ALTER TABLE profiles ADD COLUMN user_id INTEGER")
-    if not any(column[1] == "updated_at" for column in profile_columns):
-        connection.execute("ALTER TABLE profiles ADD COLUMN updated_at TEXT")
-
-    users_columns = connection.execute("PRAGMA table_info(users)").fetchall()
-    if not any(column[1] == "full_name" for column in users_columns):
-        connection.execute("ALTER TABLE users ADD COLUMN full_name TEXT NOT NULL DEFAULT ''")
-    if not any(column[1] == "updated_at" for column in users_columns):
-        connection.execute("ALTER TABLE users ADD COLUMN updated_at TEXT")
-    if not any(column[1] == "is_active" for column in users_columns):
-        connection.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
-
-    columns = connection.execute("PRAGMA table_info(chat_messages)").fetchall()
-    has_conversation_id = any(column[1] == "conversation_id" for column in columns)
-    if not has_conversation_id:
-        connection.execute("ALTER TABLE chat_messages ADD COLUMN conversation_id TEXT")
-
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_chat_messages_profile_conversation ON chat_messages(profile_id, conversation_id, created_at)"
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)"
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles(user_id)"
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_applications_profile ON applications(profile_id)"
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(profile_id, status)"
-    )
-
-    app_columns = connection.execute("PRAGMA table_info(applications)").fetchall()
-    app_col_names = [column[1] for column in app_columns]
-    for col_name, col_type in [
-        ("job_id", "TEXT"),
-        ("job_description", "TEXT"),
-        ("deadline", "TEXT"),
-        ("interview_date", "TEXT"),
-        ("interview_status", "TEXT"),
-        ("notes", "TEXT"),
-        ("follow_up_date", "TEXT"),
-        ("customized_resume", "TEXT"),
-        ("cover_letter", "TEXT"),
-    ]:
-        if app_col_names and col_name not in app_col_names:
-            connection.execute(f"ALTER TABLE applications ADD COLUMN {col_name} {col_type}")
-
-    connection.execute("UPDATE profiles SET user_id = NULL WHERE user_id = 0")
-
-    for row in connection.execute("SELECT id, email, full_name FROM profiles WHERE user_id IS NULL AND email IS NOT NULL").fetchall():
-        match_user = connection.execute(
-            "SELECT id FROM users WHERE email = ? LIMIT 1",
-            (row["email"],)
-        ).fetchone()
-        if match_user:
-            connection.execute(
-                "UPDATE profiles SET user_id = ?, full_name = ?, updated_at = ? WHERE id = ?",
-                (match_user["id"], row["full_name"], datetime.now(timezone.utc).isoformat(), row["id"])
-            )
-
-    connection.commit()
-    connection.close()
+        conn.commit()
+        print("Supabase schema verified.")
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 # ============================================================
@@ -2332,7 +2210,7 @@ def resolve_candidate_and_job(
 
 
 # ============================================================
-# M3.1 — SKILL GAP ANALYSIS
+# M3.1 â€” SKILL GAP ANALYSIS
 # ============================================================
 
 @app.post("/profiles/{profile_id}/skill-gap")
@@ -2380,7 +2258,7 @@ def analyze_skill_gap(
 
 
 # ============================================================
-# M3.2 — RESUME CUSTOMIZATION
+# M3.2 â€” RESUME CUSTOMIZATION
 # ============================================================
 
 @app.post("/profiles/{profile_id}/customize-resume")
@@ -2427,7 +2305,7 @@ def customize_resume(
 
 
 # ============================================================
-# M3.2 — COVER LETTER GENERATION
+# M3.2 â€” COVER LETTER GENERATION
 # ============================================================
 
 @app.post("/profiles/{profile_id}/cover-letter")
@@ -2474,7 +2352,7 @@ def generate_cover_letter(
 
 
 # ============================================================
-# M3.3 — INTERVIEW PREPARATION
+# M3.3 â€” INTERVIEW PREPARATION
 # ============================================================
 
 @app.post("/profiles/{profile_id}/interview-prep")
@@ -2545,7 +2423,7 @@ def generate_interview_prep(
 
 
 # ============================================================
-# M3.3 — MOCK INTERVIEW SIMULATOR
+# M3.3 â€” MOCK INTERVIEW SIMULATOR
 # ============================================================
 
 @app.post("/profiles/{profile_id}/mock-interview/start")
@@ -2791,7 +2669,7 @@ def get_mock_interview_details(
 
 
 # ============================================================
-# M4.1 — APPLICATION TRACKING & MANAGEMENT APIS
+# M4.1 â€” APPLICATION TRACKING & MANAGEMENT APIS
 # ============================================================
 
 def format_application_row(row, connection=None):
@@ -3180,7 +3058,7 @@ def delete_application(
 
 
 # ============================================================
-# M3.4 — CONVERSATIONAL CAREER ASSISTANT
+# M3.4 â€” CONVERSATIONAL CAREER ASSISTANT
 # ============================================================
 
 @app.post("/career-assistant/chat")
