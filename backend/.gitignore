@@ -1,5 +1,12 @@
-.env
+﻿.env
 __pycache__/
 *.pyc
-data/
 .venv/
+
+# Ignore all local data by default, but allow specific vector-store files
+!data/
+data/*
+!data/vector_store/
+data/vector_store/*
+!data/vector_store/jobs.index
+!data/vector_store/metadata.json
